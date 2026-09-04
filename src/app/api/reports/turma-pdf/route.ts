@@ -62,15 +62,20 @@ export async function GET(request: NextRequest) {
       let recoveryStatus: string
 
       if (originalScore >= NOTA_CORTE) {
+        // Aprovado direto (nota >= 6,0)
         mediaFinal = originalScore
         situacao = 'Aprovado'
         recoveryStatus = '—'
       } else {
+        // Reprovado na prova original - vai para recuperação
         if (recoveryScore !== null) {
-          mediaFinal = (originalScore + recoveryScore) / 2
-          situacao = mediaFinal >= NOTA_CORTE ? 'Aprovado' : 'Reprovado'
+          // Recuperação realizada: a nota final = nota da recuperação
+          // Se passar na recuperação (>= 6,0), está aprovado
+          mediaFinal = recoveryScore
+          situacao = recoveryScore >= NOTA_CORTE ? 'Aprovado' : 'Reprovado'
           recoveryStatus = 'Realizada'
         } else {
+          // Recuperação disponível mas não realizada ainda
           mediaFinal = originalScore
           situacao = 'Reprovado'
           recoveryStatus = 'Pendente'

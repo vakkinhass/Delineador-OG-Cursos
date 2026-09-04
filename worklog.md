@@ -150,3 +150,30 @@ Recovery logic:
 - If nota < 6.0: Reprovado + recovery released immediately
 - If recovery taken: média final = (nota + recuperação) / 2, Aprovado if >= 6.0
 - If recovery pending: média final = nota original, Reprovado
+
+---
+Task ID: 12
+Agent: Main Coordinator
+Task: Correção da lógica de recuperação - nota final = nota da recuperação
+
+Work Log:
+- Atualizada a lógica de cálculo da média final em /api/reports/turma-report: quando o aluno realiza a recuperação, a nota final passa a ser a nota da recuperação (não mais a média aritmética)
+- Atualizada a mesma lógica em /api/reports/turma-pdf
+- Atualizado o texto da legenda no ReportsView: "Nota final: para alunos em recuperação, a nota final é a nota da prova de recuperação. Se passar na recuperação (≥ 6,0), está aprovado."
+- Atualizada a legenda no gerador de PDF
+
+Nova regra:
+- Nota >= 6,0: Aprovado direto, nota final = nota original
+- Nota < 6,0: vai para recuperação
+  - Recuperação realizada: nota final = nota da recuperação. Aprovado se recuperação >= 6,0
+  - Recuperação pendente: nota final = nota original, Reprovado
+
+Verificação:
+- Aluna Exemplo Santos: prova original 20% -> recuperação 100% -> nota final = 100%, Situação = Aprovado
+- Confirmado via API e via Agent Browser (tabela mostra Nota 20%, Recup. 100%, Média Final 100%, Aprovado)
+- PDF exportado com sucesso (2674 bytes, PDF 1.7 válido)
+
+Stage Summary:
+- Correção aplicada em todos os 3 lugares (turma-report API, turma-pdf API, frontend legend)
+- Regra agora: quem passa na recuperação, passa de fato (a nota da recuperação substitui a original)
+- Todas as APIs retornando 200, sem erros no dev log

@@ -565,11 +565,11 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
     x: margin, y, size: 8, font: helvetica, color: GRAY,
   })
   y -= 12
-  page.drawText('• Média: média final = (nota original + nota recuperação) / 2, quando há recuperação', {
+  page.drawText('• Média: para alunos em recuperação, a nota final e a nota da prova de recuperacao', {
     x: margin, y, size: 8, font: helvetica, color: GRAY,
   })
   y -= 12
-  page.drawText('• Situação: Aprovado (média >= 6,0) ou Reprovado (média < 6,0)', {
+  page.drawText('• Situacao: Aprovado (nota final >= 6,0) ou Reprovado (nota final < 6,0)', {
     x: margin, y, size: 8, font: helvetica, color: GRAY,
   })
 

@@ -337,7 +337,7 @@ export function ReportsView() {
                 </p>
                 <p className="flex items-start gap-2">
                   <TrendingUp className="w-3.5 h-3.5 mt-0.5 shrink-0 text-green-600" />
-                  <span><strong>Média final:</strong> (nota original + nota recuperação) ÷ 2. Aprovado se média final ≥ {(notaCorte / 10).toFixed(1)}.</span>
+                  <span><strong>Nota final:</strong> para alunos em recuperação, a nota final é a nota da prova de recuperação. Se passar na recuperação (≥ {(notaCorte / 10).toFixed(1)}), está aprovado.</span>
                 </p>
               </div>
             </Card>
