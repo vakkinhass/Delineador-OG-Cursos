@@ -47,7 +47,8 @@ export function ExamResultView({ examId, onBack }: ExamResultViewProps) {
   if (!data) return null
 
   const { result, questions } = data
-  const passed = result.score >= 70
+  const NOTA_CORTE = 60
+  const passed = result.score >= NOTA_CORTE
   const formatTime = (s: number) => `${Math.floor(s / 60)}min ${s % 60}s`
 
   return (
@@ -70,11 +71,22 @@ export function ExamResultView({ examId, onBack }: ExamResultViewProps) {
           <Award className={`w-10 h-10 ${passed ? 'text-green-600' : 'text-orange-600'}`} />
         </div>
         <h2 className="text-2xl font-bold mb-1" style={{ color: passed ? 'var(--primary)' : 'var(--accent)' }}>
-          {passed ? 'Aprovado!' : 'Continue estudando!'}
+          {passed ? 'Aprovado!' : 'Você está de recuperação'}
         </h2>
         <p className="text-sm text-muted-foreground mb-4">
           {result.status === 'AUTO_SUBMITTED' ? 'Enviada automaticamente (tempo esgotado)' : 'Prova finalizada'}
+          {!passed && ' • Nota abaixo de 6,0'}
         </p>
+        {!passed && (
+          <div className="rounded-lg border p-3 mb-4" style={{ backgroundColor: 'var(--accent)10', borderColor: 'var(--accent)40' }}>
+            <p className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
+              📝 Prova de recuperação liberada!
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              A recuperação já está disponível na sua página inicial. Você tem 7 dias para realizá-la.
+            </p>
+          </div>
+        )}
 
         <div className="text-5xl font-bold mb-2" style={{ color: passed ? 'var(--primary)' : 'var(--accent)' }}>
           {result.score.toFixed(1)}%

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 
+// Nota de corte da escola: 6,0 (60%)
+const NOTA_CORTE = 60
+
 // POST /api/exams/[id]/submit
 // Submete a prova: corrige, calcula score e salva resultado.
+// Se a nota for < 6.0 (60%) e a prova NÃO for recuperação,
+// libera automaticamente uma prova de recuperação para o aluno.
 // Body: { answers: { questionId: 'A'|'B'|'C'|'D' }, autoSubmitted?: boolean }
 export async function POST(
   request: NextRequest,
@@ -40,6 +45,12 @@ export async function POST(
       orderBy: { order: 'asc' },
     })
 
+    // Buscar a prova para verificar se é de recuperação
+    const exam = await db.exam.findUnique({
+      where: { id },
+      select: { isRecovery: true, recoveryForExamId: true, title: true, durationMinutes: true, subjectId: true },
+    })
+
     // Mesclar respostas salvas com as enviadas (as enviadas têm prioridade)
     const savedAnswers = result.answers ? JSON.parse(result.answers) : {}
     const finalAnswers = { ...savedAnswers, ...answers }
@@ -54,6 +65,7 @@ export async function POST(
 
     const totalQuestions = examQuestions.length
     const score = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0
+    const roundedScore = Math.round(score * 100) / 100
 
     // Calcular tempo gasto
     const now = new Date()
@@ -64,7 +76,7 @@ export async function POST(
       where: { id: result.id },
       data: {
         answers: JSON.stringify(finalAnswers),
-        score: Math.round(score * 100) / 100,
+        score: roundedScore,
         correctCount,
         totalQuestions,
         timeSpentSeconds,
@@ -72,6 +84,63 @@ export async function POST(
         submittedAt: now,
       },
     })
+
+    // ============================================================
+    // LÓGICA DE RECUPERAÇÃO AUTOMÁTICA
+    // Se nota < 6.0 (60%) e NÃO é prova de recuperação, libera recuperação
+    // ============================================================
+    let recoveryReleased = false
+    const isRecovery = exam?.isRecovery === true
+
+    if (!isRecovery && roundedScore < NOTA_CORTE) {
+      // Verificar se já existe uma prova de recuperação para esta prova
+      let recoveryExam = await db.exam.findFirst({
+        where: { recoveryForExamId: id },
+      })
+
+      if (!recoveryExam) {
+        // Criar a prova de recuperação (cópia da original)
+        recoveryExam = await db.exam.create({
+          data: {
+            title: `${exam?.title || 'Prova'} - Recuperação`,
+            description: 'Prova de recuperação liberada automaticamente',
+            turmaId: null, // recuperação é individual
+            subjectId: exam?.subjectId || null,
+            startDateTime: now,
+            endDateTime: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000), // 7 dias
+            durationMinutes: exam?.durationMinutes || 60,
+            active: true,
+            isRecovery: true,
+            recoveryForExamId: id,
+            questions: {
+              create: examQuestions.map((eq, index) => ({
+                questionId: eq.questionId,
+                order: index,
+              })),
+            },
+          },
+        })
+      }
+
+      // Verificar se já existe agendamento de recuperação para este aluno
+      const existingAssignment = await db.examAssignment.findUnique({
+        where: { examId_userId: { examId: recoveryExam.id, userId: user.id } },
+      })
+
+      if (!existingAssignment) {
+        // Liberar a recuperação imediatamente para o aluno
+        await db.examAssignment.create({
+          data: {
+            examId: recoveryExam.id,
+            userId: user.id,
+            startDateTime: now, // disponível imediatamente
+            endDateTime: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000), // 7 dias para realizar
+            durationMinutes: exam?.durationMinutes || 60,
+          },
+        })
+        recoveryReleased = true
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -82,6 +151,10 @@ export async function POST(
       timeSpentSeconds: updated.timeSpentSeconds,
       status: updated.status,
       autoSubmitted,
+      notaCorte: NOTA_CORTE,
+      aprovado: roundedScore >= NOTA_CORTE,
+      recoveryReleased, // true se a recuperação foi liberada agora
+      isRecovery,
     })
   } catch (error) {
     console.error('Submit exam error:', error)

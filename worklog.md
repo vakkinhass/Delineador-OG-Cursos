@@ -116,3 +116,37 @@ Stage Summary:
 - Application is fully functional and production-ready
 - Visual identity (Ocean Green) applied throughout
 - Responsive design with sticky header confirmed
+
+---
+Task ID: 11
+Agent: Main Coordinator
+Task: Add nota de corte (6.0), automatic recovery exams, consolidated turma report with PDF export
+
+Work Log:
+- Updated Prisma schema: added isRecovery + recoveryForExamId fields to Exam model (self-relation for recovery exams)
+- Ran db:push and db:generate to sync schema
+- Updated exam submit logic: when student scores < 60% (6.0), automatically creates a recovery exam (copy of original questions) and assigns it to the student with immediate availability (7-day window)
+- Updated ExamResultView to show pass/fail with 6.0 cutoff + recovery notification
+- Updated ExamRunner to show recovery-released toast after submit
+- Updated StudentDashboard to show recovery exam badge (orange border + "Recuperação" label)
+- Created /api/reports/turma-report API: consolidated data with nome, cpf, data, horário, duração, nota, recuperação, média final, situação
+- Created /api/reports/turma-pdf API: exports complete turma report as PDF with Ocean Green colors
+- Added generateTurmaReportPdf function to pdf-generator.ts (A4 PDF with green header, table with alternating rows, legenda)
+- Rewrote ReportsView with 2 tabs: "Relatório Consolidado" (new) + "Por Prova" (existing)
+- Added "Exportar Relatório em PDF" button on consolidated tab
+- Added nota de corte badge, recovery status (Pendente/Realizada), situação (Aprovado/Reprovado) badges
+- Added legend explaining recovery rules
+
+Stage Summary:
+- Nota de corte = 6.0 (60%) applied throughout
+- Recovery auto-release verified end-to-end: student scored 20% -> recovery exam created + assigned immediately
+- Consolidated report table shows all requested columns: nome, cpf, data, horário, duração, nota, recuperação, média final, situação
+- PDF export verified: valid PDF 1.7 (2687 bytes) with Ocean Green colors
+- All APIs returning 200, no errors in dev log
+- Agent Browser verified Reports tab shows consolidated table with export button
+
+Recovery logic:
+- If nota >= 6.0: Aprovado (no recovery)
+- If nota < 6.0: Reprovado + recovery released immediately
+- If recovery taken: média final = (nota + recuperação) / 2, Aprovado if >= 6.0
+- If recovery pending: média final = nota original, Reprovado

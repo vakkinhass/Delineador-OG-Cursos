@@ -101,6 +101,8 @@ model Exam {
   endDateTime     DateTime // data/hora de término (fechamento)
   durationMinutes Int      // tempo máximo de realização em minutos
   active          Boolean  @default(true)
+  isRecovery      Boolean  @default(false) // true = prova de recuperação
+  recoveryForExamId String? // ID da prova original (quando esta é recuperação)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -109,9 +111,13 @@ model Exam {
   questions   ExamQuestion[]
   results     ExamResult[]
   assignments ExamAssignment[] // agendamentos específicos para alunos
+  // Auto-relação para provas de recuperação
+  recoveryForExam Exam?  @relation("RecoveryExam", fields: [recoveryForExamId], references: [id], onDelete: SetNull)
+  recoveryExams   Exam[] @relation("RecoveryExam")
 
   @@index([turmaId])
   @@index([startDateTime])
+  @@index([isRecovery])
 }
 
 // Tabela de junção Prova <-> Questão

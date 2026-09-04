@@ -17,6 +17,7 @@ import {
   Calendar,
   CheckCircle,
   AlertCircle,
+  RotateCcw,
 } from 'lucide-react'
 import type { SessionUser, ExamDTO } from '@/lib/types'
 import { apiFetch } from '@/lib/api/client'
@@ -277,10 +278,17 @@ function HomeView({
           </h3>
           <div className="space-y-3">
             {availableExams.map((exam) => (
-              <Card key={exam.id} className="p-4 border-green-500/30 bg-green-50/30">
+              <Card key={exam.id} className={`p-4 ${exam.isRecovery ? 'border-orange-500/40 bg-orange-50/30' : 'border-green-500/30 bg-green-50/30'}`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h4 className="font-semibold">{exam.title}</h4>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-semibold">{exam.title}</h4>
+                      {exam.isRecovery && (
+                        <Badge variant="secondary" className="text-xs gap-1" style={{ backgroundColor: 'var(--accent)20', color: 'var(--accent)' }}>
+                          <RotateCcw className="w-3 h-3" /> Recuperação
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {exam.turmaName} • {exam.subjectName || 'Multi'} • {exam.questionCount} questões • {exam.durationMinutes} min
                     </p>

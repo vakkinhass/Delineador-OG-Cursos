@@ -101,16 +101,29 @@ export function ExamRunner({ examId, onBack, onFinish }: ExamRunnerProps) {
       submittingRef.current = true
       setSubmitting(true)
       try {
-        await apiFetch(`/api/exams/${examId}/submit`, {
+        const data = await apiFetch<any>(`/api/exams/${examId}/submit`, {
           method: 'POST',
           body: JSON.stringify({ answers: answersRef.current, autoSubmitted }),
         })
-        toast({
-          title: autoSubmitted ? 'Tempo esgotado!' : 'Prova finalizada!',
-          description: autoSubmitted
-            ? 'Sua prova foi enviada automaticamente.'
-            : 'Suas respostas foram registradas com sucesso.',
-        })
+        // Feedback baseado no resultado (aprovação/recuperação)
+        if (data.recoveryReleased) {
+          toast({
+            title: 'Prova finalizada - Recuperação liberada!',
+            description: `Nota: ${data.score.toFixed(1)}%. Como ficou abaixo de 6,0, a recuperação já está disponível na sua página inicial.`,
+          })
+        } else if (data.aprovado) {
+          toast({
+            title: 'Prova finalizada - Aprovado! 🎉',
+            description: `Parabéns! Sua nota foi ${data.score.toFixed(1)}%.`,
+          })
+        } else {
+          toast({
+            title: autoSubmitted ? 'Tempo esgotado!' : 'Prova finalizada!',
+            description: autoSubmitted
+              ? 'Sua prova foi enviada automaticamente.'
+              : 'Suas respostas foram registradas com sucesso.',
+          })
+        }
         onFinish(examId)
       } catch (err: any) {
         toast({ title: 'Erro', description: err.message, variant: 'destructive' })

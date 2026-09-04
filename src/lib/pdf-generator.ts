@@ -361,3 +361,223 @@ export async function generateExamPdf(
 
   return await pdfDoc.save()
 }
+
+// ============================================================
+// GERADOR DE PDF - Relatório Consolidado da Turma
+// ============================================================
+
+export interface TurmaReportRow {
+  nome: string
+  cpf: string
+  dataProva: string
+  horario: string
+  duracao: string
+  notaObtida: number
+  notaRecuperacao: number | null
+  recoveryStatus: string
+  mediaFinal: number
+  situacao: string
+}
+
+export interface TurmaReportExam {
+  title: string
+  turmaName: string
+  subjectName: string
+  questionCount: number
+  statistics: { media: number; maior: number; menor: number }
+  aprovados: number
+  reprovados: number
+  recuperacaoPendente: number
+  rows: TurmaReportRow[]
+}
+
+export interface TurmaReportData {
+  turmaName: string
+  notaCorte: number
+  exams: TurmaReportExam[]
+}
+
+export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create()
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const pageWidth = 595.28 // A4
+  const pageHeight = 841.89
+  const margin = 40
+  const contentWidth = pageWidth - margin * 2
+
+  let page = pdfDoc.addPage([pageWidth, pageHeight])
+  let y = pageHeight - margin
+
+  const ensureSpace = (needed: number) => {
+    if (y - needed < margin + 40) {
+      page.drawText(`Ocean Green Treinamentos - Relatório Consolidado   |   Página ${pdfDoc.getPageCount()}`, {
+        x: margin, y: 25, size: 8, font: helvetica, color: GRAY,
+      })
+      page = pdfDoc.addPage([pageWidth, pageHeight])
+      y = pageHeight - margin
+    }
+  }
+
+  // ===== CABEÇALHO =====
+  page.drawRectangle({
+    x: 0, y: pageHeight - 70, width: pageWidth, height: 70, color: OCEAN_GREEN,
+  })
+  page.drawText('OCEAN GREEN TREINAMENTOS', {
+    x: margin, y: pageHeight - 30, size: 16, font: helveticaBold, color: rgb(1, 1, 1),
+  })
+  page.drawText('Relatório Consolidado de Notas', {
+    x: margin, y: pageHeight - 48, size: 10, font: helvetica, color: rgb(0.85, 0.9, 0.88),
+  })
+  // Nota de corte à direita
+  page.drawRectangle({
+    x: pageWidth - margin - 120, y: pageHeight - 45, width: 120, height: 18, color: MINT_GREEN,
+  })
+  page.drawText(`Nota de corte: ${(data.notaCorte / 10).toFixed(1)}`, {
+    x: pageWidth - margin - 110, y: pageHeight - 33, size: 9, font: helveticaBold, color: rgb(1, 1, 1),
+  })
+
+  y = pageHeight - 95
+
+  // Info da turma
+  page.drawText(`Turma: ${data.turmaName}`, {
+    x: margin, y, size: 12, font: helveticaBold, color: PETROL_BLUE,
+  })
+  y -= 14
+  page.drawText(`Data de geração: ${new Date().toLocaleString('pt-BR')}`, {
+    x: margin, y, size: 9, font: helvetica, color: GRAY,
+  })
+  y -= 20
+
+  // Para cada prova, gerar a tabela
+  for (const exam of data.exams) {
+    ensureSpace(80)
+
+    // Título da prova
+    page.drawRectangle({
+      x: margin, y: y - 16, width: contentWidth, height: 20, color: PETROL_BLUE,
+    })
+    page.drawText(exam.title, {
+      x: margin + 6, y: y - 11, size: 11, font: helveticaBold, color: rgb(1, 1, 1),
+    })
+    y -= 28
+
+    // Info da prova
+    page.drawText(`Disciplina: ${exam.subjectName}  |  Questões: ${exam.questionCount}  |  Alunos: ${exam.rows.length}`, {
+      x: margin, y, size: 9, font: helvetica, color: GRAY,
+    })
+    y -= 14
+    page.drawText(`Estatísticas - Média: ${exam.statistics.media.toFixed(1)}%  |  Maior: ${exam.statistics.maior.toFixed(1)}%  |  Menor: ${exam.statistics.menor.toFixed(1)}%`, {
+      x: margin, y, size: 9, font: helvetica, color: GRAY,
+    })
+    y -= 14
+    page.drawText(`Aprovados: ${exam.aprovados}  |  Reprovados: ${exam.reprovados}  |  Recuperação Pendente: ${exam.recuperacaoPendente}`, {
+      x: margin, y, size: 9, font: helvetica, color: GRAY,
+    })
+    y -= 18
+
+    // Cabeçalho da tabela
+    const colWidths = [130, 75, 55, 45, 45, 50, 55, 50] // nome, cpf, data, horário, duração, nota, recup, média
+    const colX = [margin]
+    for (let i = 0; i < colWidths.length; i++) {
+      colX.push(colX[i] + colWidths[i])
+    }
+
+    // Linha de cabeçalho (fundo verde)
+    page.drawRectangle({
+      x: margin, y: y - 14, width: contentWidth, height: 16, color: OCEAN_GREEN,
+    })
+    const headers = ['Aluno', 'CPF', 'Data', 'Horário', 'Duração', 'Nota', 'Recup.', 'Média']
+    for (let i = 0; i < headers.length; i++) {
+      page.drawText(headers[i], {
+        x: colX[i] + 3, y: y - 9, size: 8, font: helveticaBold, color: rgb(1, 1, 1),
+      })
+    }
+    y -= 18
+
+    // Linhas de dados
+    for (let rowIdx = 0; rowIdx < exam.rows.length; rowIdx++) {
+      const row = exam.rows[rowIdx]
+      ensureSpace(20)
+
+      // Alternar cor de fundo
+      if (rowIdx % 2 === 0) {
+        page.drawRectangle({
+          x: margin, y: y - 14, width: contentWidth, height: 16,
+          color: rgb(0.95, 0.97, 0.96),
+        })
+      }
+
+      const values = [
+        row.nome.length > 22 ? row.nome.slice(0, 21) + '…' : row.nome,
+        row.cpf,
+        row.dataProva,
+        row.horario,
+        row.duracao,
+        `${row.notaObtida.toFixed(1)}%`,
+        row.notaRecuperacao !== null ? `${row.notaRecuperacao.toFixed(1)}%` : (row.recoveryStatus === 'Pendente' ? 'Pendente' : '—'),
+        `${row.mediaFinal.toFixed(1)}%`,
+      ]
+
+      for (let i = 0; i < values.length; i++) {
+        const isSituacao = i === 7
+        const color = isSituacao
+          ? (row.situacao === 'Aprovado' ? OCEAN_GREEN : rgb(0.7, 0.1, 0.1))
+          : DARK_TEXT
+        page.drawText(values[i], {
+          x: colX[i] + 3, y: y - 9, size: 8,
+          font: isSituacao ? helveticaBold : helvetica, color,
+        })
+      }
+
+      // Badge de situação ao final
+      const situacaoColor = row.situacao === 'Aprovado' ? OCEAN_GREEN : rgb(0.7, 0.1, 0.1)
+      page.drawText(row.situacao, {
+        x: colX[7] + 3, y: y - 9, size: 8, font: helveticaBold, color: situacaoColor,
+      })
+
+      y -= 16
+    }
+
+    y -= 12
+    // Separador entre provas
+    ensureSpace(6)
+    page.drawLine({
+      start: { x: margin, y }, end: { x: pageWidth - margin, y },
+      thickness: 0.5, color: LIGHT_GRAY,
+    })
+    y -= 16
+  }
+
+  // Legenda
+  ensureSpace(40)
+  y -= 4
+  page.drawText('Legenda:', {
+    x: margin, y, size: 9, font: helveticaBold, color: PETROL_BLUE,
+  })
+  y -= 14
+  page.drawText('• Nota: percentual de acertos na prova oficial', {
+    x: margin, y, size: 8, font: helvetica, color: GRAY,
+  })
+  y -= 12
+  page.drawText('• Recup.: nota da prova de recuperação (liberada automaticamente para notas abaixo de 6,0)', {
+    x: margin, y, size: 8, font: helvetica, color: GRAY,
+  })
+  y -= 12
+  page.drawText('• Média: média final = (nota original + nota recuperação) / 2, quando há recuperação', {
+    x: margin, y, size: 8, font: helvetica, color: GRAY,
+  })
+  y -= 12
+  page.drawText('• Situação: Aprovado (média >= 6,0) ou Reprovado (média < 6,0)', {
+    x: margin, y, size: 8, font: helvetica, color: GRAY,
+  })
+
+  // Rodapé final
+  page.drawText(`Ocean Green Treinamentos - Relatório Consolidado   |   Página ${pdfDoc.getPageCount()}`, {
+    x: margin, y: 25, size: 8, font: helvetica, color: GRAY,
+  })
+
+  return await pdfDoc.save()
+}
+
