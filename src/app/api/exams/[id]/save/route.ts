@@ -1,0 +1,44 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
+
+// POST /api/exams/[id]/save
+// Auto-save das respostas (a cada clique do aluno).
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const user = await getCurrentUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  }
+
+  const { id } = await params
+
+  try {
+    const body = await request.json()
+    const answers = body.answers || {}
+
+    const existing = await db.examResult.findUnique({
+      where: { examId_userId: { examId: id, userId: user.id } },
+    })
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Prova não iniciada.' }, { status: 400 })
+    }
+
+    if (existing.status === 'SUBMITTED' || existing.status === 'AUTO_SUBMITTED') {
+      return NextResponse.json({ error: 'Prova já finalizada.' }, { status: 400 })
+    }
+
+    await db.examResult.update({
+      where: { id: existing.id },
+      data: { answers: JSON.stringify(answers), updatedAt: new Date() },
+    })
+
+    return NextResponse.json({ success: true, savedAt: new Date().toISOString() })
+  } catch (error) {
+    console.error('Save exam error:', error)
+    return NextResponse.json({ error: 'Erro ao salvar respostas.' }, { status: 500 })
+  }
+}

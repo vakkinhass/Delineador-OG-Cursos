@@ -1,0 +1,168 @@
+// Ocean Green Treinamentos - Database Schema
+// Sistema de Simulados e Avaliações - Delineador Industrial
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USUÁRIOS E AUTENTICAÇÃO
+// ============================================================
+model User {
+  id        String   @id @default(cuid())
+  cpf       String   @unique // CPF com máscara (formato: 000.000.000-00)
+  name      String
+  role      String   @default("STUDENT") // ADMIN | STUDENT
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos
+  turmas     UserTurma[]
+  examResults ExamResult[]
+  examAssignments ExamAssignment[] // provas agendadas especificamente para o aluno
+}
+
+// ============================================================
+// TURMAS (Gestão Independente)
+// ============================================================
+model Turma {
+  id          String   @id @default(cuid())
+  name        String   @unique // ex: "Delineador 2026.2", "Turma Intensiva"
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users UserTurma[]
+  exams Exam[]
+}
+
+model UserTurma {
+  id      String @id @default(cuid())
+  userId  String
+  turmaId String
+  enrolledAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  turma Turma @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, turmaId])
+}
+
+// ============================================================
+// DISCIPLINAS E BANCO DE QUESTÕES
+// ============================================================
+model Subject {
+  id          String   @id @default(cuid())
+  name        String   @unique // ex: "Delineação Industrial", "Segurança do Trabalho"
+  description String?
+  createdAt   DateTime @default(now())
+
+  questions Question[]
+  exams     Exam[]
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  subjectId     String
+  difficulty    String   @default("EASY") // EASY | MEDIUM | HARD
+  statement     String // enunciado da questão
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctAnswer String   @default("A") // A | B | C | D
+  explanation   String? // gabarito comentado
+  createdAt     DateTime @default(now())
+
+  subject  Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  exams    ExamQuestion[]
+
+  @@index([subjectId])
+  @@index([difficulty])
+}
+
+// ============================================================
+// PROVAS OFICIAIS (Avaliações Programadas)
+// ============================================================
+model Exam {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  turmaId         String? // null quando agendada para aluno específico
+  subjectId       String? // null = mistura de matérias
+  startDateTime   DateTime // data/hora de início (liberação)
+  endDateTime     DateTime // data/hora de término (fechamento)
+  durationMinutes Int      // tempo máximo de realização em minutos
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  turma       Turma?     @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+  subject     Subject?   @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  questions   ExamQuestion[]
+  results     ExamResult[]
+  assignments ExamAssignment[] // agendamentos específicos para alunos
+
+  @@index([turmaId])
+  @@index([startDateTime])
+}
+
+// Tabela de junção Prova <-> Questão
+model ExamQuestion {
+  id         String @id @default(cuid())
+  examId     String
+  questionId String
+  order      Int    @default(0)
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, questionId])
+}
+
+// Agendamento de prova para aluno específico (prova antecipada/individual)
+model ExamAssignment {
+  id         String   @id @default(cuid())
+  examId     String
+  userId     String
+  startDateTime DateTime // sobrescreve a data de início da prova para este aluno
+  endDateTime   DateTime // sobrescreve a data de término da prova para este aluno
+  durationMinutes Int    // sobrescreve a duração para este aluno (opcional)
+  createdAt  DateTime @default(now())
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, userId])
+}
+
+// Resultado / Respostas do aluno
+model ExamResult {
+  id         String   @id @default(cuid())
+  examId     String
+  userId     String
+  answers    String   @default("{}") // JSON: { questionId: "A" | "B" | "C" | "D" }
+  score      Float    @default(0) // percentual de acertos (0-100)
+  correctCount Int    @default(0)
+  totalQuestions Int  @default(0)
+  timeSpentSeconds Int @default(0) // tempo gasto em segundos
+  startedAt  DateTime?
+  submittedAt DateTime?
+  status     String   @default("PENDING") // PENDING | IN_PROGRESS | SUBMITTED | AUTO_SUBMITTED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, userId])
+  @@index([examId])
+  @@index([userId])
+}
