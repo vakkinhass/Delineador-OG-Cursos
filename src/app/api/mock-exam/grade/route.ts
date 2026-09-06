@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { getCurrentUser } from '@/lib/auth'
 import type { AnswerOption, AnswersMap } from '@/lib/types'
 
@@ -27,34 +27,39 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar questões com gabarito
-    const questions = await db.question.findMany({
-      where: { id: { in: questionIds } },
-      include: { subject: { select: { name: true } } },
-    })
+    const questionsRes = await query(
+      `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+              q."correctAnswer" AS correctanswer, q.explanation,
+              s.name AS "subjectName"
+         FROM "Question" q
+         LEFT JOIN "Subject" s ON s.id = q."subjectId"
+        WHERE q.id = ANY($1::text[])`,
+      [questionIds]
+    )
 
     let correctCount = 0
-    const results = questions.map((q, index) => {
+    const results = questionsRes.rows.map((q, index) => {
       const userAnswer = answers[q.id] as AnswerOption
-      const isCorrect = userAnswer === q.correctAnswer
+      const isCorrect = userAnswer === q.correctanswer
       if (isCorrect) correctCount++
 
       return {
         id: q.id,
         index: index + 1,
-        subjectName: q.subject.name,
+        subjectName: q.subjectname,
         statement: q.statement,
-        optionA: q.optionA,
-        optionB: q.optionB,
-        optionC: q.optionC,
-        optionD: q.optionD,
-        correctAnswer: q.correctAnswer,
+        optionA: q.optiona,
+        optionB: q.optionb,
+        optionC: q.optionc,
+        optionD: q.optiond,
+        correctAnswer: q.correctanswer,
         userAnswer,
         isCorrect,
         explanation: q.explanation,
       }
     })
 
-    const totalQuestions = questions.length
+    const totalQuestions = questionsRes.rows.length
     const score = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0
 
     // Estatísticas por disciplina

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { requireAdmin } from '@/lib/auth'
 
 // POST /api/exams/[id]/assign
@@ -34,48 +34,59 @@ export async function POST(
     }
 
     // Verificar se a prova e o aluno existem
-    const exam = await db.exam.findUnique({ where: { id } })
-    if (!exam) {
+    const examRes = await query('SELECT id, "durationMinutes" AS durationminutes FROM "Exam" WHERE id = $1', [id])
+    if (examRes.rows.length === 0) {
       return NextResponse.json({ error: 'Prova não encontrada.' }, { status: 404 })
     }
+    const exam = examRes.rows[0]
 
-    const student = await db.user.findUnique({ where: { id: userId } })
-    if (!student) {
+    const studentRes = await query('SELECT id, name, cpf, role FROM "User" WHERE id = $1', [userId])
+    if (studentRes.rows.length === 0) {
       return NextResponse.json({ error: 'Aluno não encontrado.' }, { status: 404 })
     }
+    const student = studentRes.rows[0]
 
     if (student.role !== 'STUDENT') {
       return NextResponse.json({ error: 'O usuário selecionado não é um aluno.' }, { status: 400 })
     }
 
-    // Criar ou atualizar atribuição
-    const assignment = await db.examAssignment.upsert({
-      where: { examId_userId: { examId: id, userId } },
-      update: {
-        startDateTime,
-        endDateTime,
-        durationMinutes: durationMinutes || exam.durationMinutes,
-      },
-      create: {
-        examId: id,
-        userId,
-        startDateTime,
-        endDateTime,
-        durationMinutes: durationMinutes || exam.durationMinutes,
-      },
-      include: { user: { select: { name: true, cpf: true } } },
-    })
+    const effectiveDuration = durationMinutes || exam.durationminutes
+
+    // Verificar se já existe atribuição (upsert)
+    const existingRes = await query(
+      `SELECT id FROM "ExamAssignment" WHERE "examId" = $1 AND "userId" = $2`,
+      [id, userId]
+    )
+
+    let assignmentId: string
+    if (existingRes.rows.length > 0) {
+      assignmentId = existingRes.rows[0].id
+      await query(
+        `UPDATE "ExamAssignment"
+            SET "startDateTime" = $1, "endDateTime" = $2, "durationMinutes" = $3
+          WHERE id = $4`,
+        [startDateTime, endDateTime, effectiveDuration, assignmentId]
+      )
+    } else {
+      assignmentId = generateId()
+      await query(
+        `INSERT INTO "ExamAssignment" (id, "examId", "userId",
+             "startDateTime", "endDateTime", "durationMinutes", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [assignmentId, id, userId, startDateTime, endDateTime, effectiveDuration]
+      )
+    }
 
     return NextResponse.json({
       success: true,
       assignment: {
-        id: assignment.id,
-        userId: assignment.userId,
-        userName: assignment.user.name,
-        userCpf: assignment.user.cpf,
-        startDateTime: assignment.startDateTime.toISOString(),
-        endDateTime: assignment.endDateTime.toISOString(),
-        durationMinutes: assignment.durationMinutes,
+        id: assignmentId,
+        userId,
+        userName: student.name,
+        userCpf: student.cpf,
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString(),
+        durationMinutes: effectiveDuration,
       },
     })
   } catch (error) {
@@ -104,9 +115,10 @@ export async function DELETE(
   }
 
   try {
-    await db.examAssignment.delete({
-      where: { examId_userId: { examId: id, userId } },
-    })
+    await query(
+      `DELETE FROM "ExamAssignment" WHERE "examId" = $1 AND "userId" = $2`,
+      [id, userId]
+    )
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Delete assignment error:', error)

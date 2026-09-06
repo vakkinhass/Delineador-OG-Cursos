@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { createSession, sanitizeCpf, maskCpf, isValidCpfFormat } from '@/lib/auth'
 
 // POST /api/auth/login - Login por CPF (único campo)
@@ -18,25 +18,19 @@ export async function POST(request: NextRequest) {
 
     const maskedCpf = maskCpf(cpf)
 
-    // Buscar usuário pelo CPF (com máscara)
-    const user = await db.user.findUnique({
-      where: { cpf: maskedCpf },
-      select: {
-        id: true,
-        cpf: true,
-        name: true,
-        role: true,
-        active: true,
-      },
-    })
+    const res = await query(
+      'SELECT id, cpf, name, role, active FROM "User" WHERE cpf = $1',
+      [maskedCpf]
+    )
 
-    if (!user) {
+    if (res.rows.length === 0) {
       return NextResponse.json(
         { error: 'CPF não cadastrado. Procure o administrador.' },
         { status: 404 }
       )
     }
 
+    const user = res.rows[0]
     if (!user.active) {
       return NextResponse.json(
         { error: 'Acesso bloqueado. Contate o administrador.' },
@@ -44,7 +38,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await createSession(user)
+    await createSession({
+      id: user.id,
+      cpf: user.cpf,
+      name: user.name,
+      role: user.role,
+      active: user.active,
+    })
 
     return NextResponse.json({
       success: true,

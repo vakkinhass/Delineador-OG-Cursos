@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 
 // ============================================================
 // SISTEMA DE AUTENTICAÇÃO POR CPF
@@ -86,17 +86,29 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     const decoded = JSON.parse(Buffer.from(token, 'base64').toString())
     if (!decoded?.id) return null
 
-    const user = await db.user.findUnique({
-      where: { id: decoded.id },
-      select: { id: true, cpf: true, name: true, role: true, active: true },
-    })
+    const res = await query(
+      'SELECT id, cpf, name, role, active FROM "User" WHERE id = $1',
+      [decoded.id]
+    )
 
-    if (!user || !user.active) {
+    if (res.rows.length === 0) {
       await destroySession()
       return null
     }
 
-    return user as SessionUser
+    const user = res.rows[0]
+    if (!user.active) {
+      await destroySession()
+      return null
+    }
+
+    return {
+      id: user.id,
+      cpf: user.cpf,
+      name: user.name,
+      role: user.role,
+      active: user.active,
+    }
   } catch {
     return null
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { requireAdmin } from '@/lib/auth'
 import { generateTurmaReportPdf } from '@/lib/pdf-generator'
 
@@ -18,43 +18,103 @@ export async function GET(request: NextRequest) {
   const turmaId = searchParams.get('turmaId')
 
   // Buscar provas oficiais (não de recuperação)
-  const examWhere: { isRecovery: boolean; turmaId?: string } = { isRecovery: false }
-  if (turmaId) examWhere.turmaId = turmaId
+  const params: any[] = []
+  const conditions = [`e."isRecovery" = false`]
+  if (turmaId) {
+    params.push(turmaId)
+    conditions.push(`e."turmaId" = $${params.length}`)
+  }
 
-  const exams = await db.exam.findMany({
-    where: examWhere,
-    orderBy: { startDateTime: 'asc' },
-    include: {
-      turma: { select: { name: true } },
-      subject: { select: { name: true } },
-      _count: { select: { questions: true } },
-      results: {
-        where: { status: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
-        include: { user: { select: { id: true, name: true, cpf: true } } },
-      },
-      recoveryExams: {
-        include: {
-          results: {
-            where: { status: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
-            select: { userId: true, score: true, timeSpentSeconds: true, submittedAt: true },
-          },
-        },
-      },
-    },
-  })
+  const examsRes = await query(
+    `SELECT e.id, e.title,
+            t.name AS "turmaName", s.name AS "subjectName"
+       FROM "Exam" e
+       LEFT JOIN "Turma" t ON t.id = e."turmaId"
+       LEFT JOIN "Subject" s ON s.id = e."subjectId"
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY e."startDateTime" ASC`,
+    params
+  )
+
+  const examIds = examsRes.rows.map((e) => e.id)
+
+  // Contar questões por prova
+  let questionCounts: Record<string, number> = {}
+  if (examIds.length > 0) {
+    const qCountRes = await query(
+      `SELECT "examId" AS examid, COUNT(*)::int AS count
+         FROM "ExamQuestion"
+        WHERE "examId" = ANY($1::text[])
+        GROUP BY "examId"`,
+      [examIds]
+    )
+    for (const row of qCountRes.rows) questionCounts[row.examid] = row.count
+  }
+
+  // Buscar resultados submetidos
+  let resultsByExam: Record<string, any[]> = {}
+  if (examIds.length > 0) {
+    const resultsRes = await query(
+      `SELECT r."examId" AS examid, r."userId" AS userid, r.score,
+              r."timeSpentSeconds" AS timespentseconds, r."submittedAt" AS submittedat,
+              u.name AS "userName", u.cpf AS "userCpf"
+         FROM "ExamResult" r
+         JOIN "User" u ON u.id = r."userId"
+        WHERE r."examId" = ANY($1::text[])
+          AND r.status IN ('SUBMITTED', 'AUTO_SUBMITTED')`,
+      [examIds]
+    )
+    for (const row of resultsRes.rows) {
+      if (!resultsByExam[row.examid]) resultsByExam[row.examid] = []
+      resultsByExam[row.examid].push(row)
+    }
+  }
+
+  // Buscar provas de recuperação e seus resultados
+  let recoveryExamsByOriginal: Record<string, any[]> = {}
+  if (examIds.length > 0) {
+    const recoveryExamsRes = await query(
+      `SELECT id, "recoveryForExamId" AS recoveryforexamid
+         FROM "Exam"
+        WHERE "isRecovery" = true AND "recoveryForExamId" = ANY($1::text[])`,
+      [examIds]
+    )
+    const recoveryExamIds = recoveryExamsRes.rows.map((r) => r.id)
+    let recoveryResultsByRecoveryExam: Record<string, any[]> = {}
+    if (recoveryExamIds.length > 0) {
+      const recoveryResultsRes = await query(
+        `SELECT "examId" AS examid, "userId" AS userid, score, "timeSpentSeconds" AS timespentseconds, "submittedAt" AS submittedat
+           FROM "ExamResult"
+          WHERE "examId" = ANY($1::text[])
+            AND status IN ('SUBMITTED', 'AUTO_SUBMITTED')`,
+        [recoveryExamIds]
+      )
+      for (const row of recoveryResultsRes.rows) {
+        if (!recoveryResultsByRecoveryExam[row.examid]) recoveryResultsByRecoveryExam[row.examid] = []
+        recoveryResultsByRecoveryExam[row.examid].push(row)
+      }
+    }
+    for (const re of recoveryExamsRes.rows) {
+      if (!recoveryExamsByOriginal[re.recoveryforexamid]) recoveryExamsByOriginal[re.recoveryforexamid] = []
+      recoveryExamsByOriginal[re.recoveryforexamid].push({
+        id: re.id,
+        results: recoveryResultsByRecoveryExam[re.id] || [],
+      })
+    }
+  }
 
   // Construir dados do relatório
-  const examReports = exams.map((exam) => {
+  const examReports = examsRes.rows.map((exam) => {
     const recoveryByUser: Record<string, any> = {}
-    for (const recExam of exam.recoveryExams) {
+    for (const recExam of (recoveryExamsByOriginal[exam.id] || [])) {
       for (const recResult of recExam.results) {
-        recoveryByUser[recResult.userId] = recResult
+        recoveryByUser[recResult.userid] = recResult
       }
     }
 
-    const rows = exam.results.map((r) => {
+    const rows = (resultsByExam[exam.id] || []).map((r) => {
       const originalScore = r.score
-      const recoveryResult = recoveryByUser[r.userId]
+      const recoveryResult = recoveryByUser[r.userid]
       const recoveryScore = recoveryResult?.score ?? null
 
       let mediaFinal: number
@@ -62,40 +122,35 @@ export async function GET(request: NextRequest) {
       let recoveryStatus: string
 
       if (originalScore >= NOTA_CORTE) {
-        // Aprovado direto (nota >= 6,0)
         mediaFinal = originalScore
         situacao = 'Aprovado'
         recoveryStatus = '—'
       } else {
-        // Reprovado na prova original - vai para recuperação
         if (recoveryScore !== null) {
-          // Recuperação realizada: a nota final = nota da recuperação
-          // Se passar na recuperação (>= 6,0), está aprovado
           mediaFinal = recoveryScore
           situacao = recoveryScore >= NOTA_CORTE ? 'Aprovado' : 'Reprovado'
           recoveryStatus = 'Realizada'
         } else {
-          // Recuperação disponível mas não realizada ainda
           mediaFinal = originalScore
           situacao = 'Reprovado'
           recoveryStatus = 'Pendente'
         }
       }
 
-      const submittedDate = r.submittedAt ? new Date(r.submittedAt) : null
+      const submittedDate = r.submittedat ? new Date(r.submittedat) : null
       const dataProva = submittedDate
         ? submittedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
         : '—'
       const horario = submittedDate
         ? submittedDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
         : '—'
-      const duracao = r.timeSpentSeconds
-        ? `${Math.floor(r.timeSpentSeconds / 60)}min ${r.timeSpentSeconds % 60}s`
+      const duracao = r.timespentseconds
+        ? `${Math.floor(r.timespentseconds / 60)}min ${r.timespentseconds % 60}s`
         : '—'
 
       return {
-        nome: r.user.name,
-        cpf: r.user.cpf,
+        nome: r.username,
+        cpf: r.usercpf,
         dataProva,
         horario,
         duracao,
@@ -114,9 +169,9 @@ export async function GET(request: NextRequest) {
 
     return {
       title: exam.title,
-      turmaName: exam.turma?.name || 'Sem turma',
-      subjectName: exam.subject?.name || 'Multi',
-      questionCount: exam._count.questions,
+      turmaName: exam.turmaname || 'Sem turma',
+      subjectName: exam.subjectname || 'Multi',
+      questionCount: questionCounts[exam.id] || 0,
       statistics: {
         media: allFinalGrades.length > 0 ? Math.round((allFinalGrades.reduce((a, b) => a + b, 0) / allFinalGrades.length) * 100) / 100 : 0,
         maior: allFinalGrades.length > 0 ? Math.max(...allFinalGrades) : 0,
@@ -129,7 +184,7 @@ export async function GET(request: NextRequest) {
     }
   })
 
-  const turmaName = exams[0]?.turma?.name || 'Todas as turmas'
+  const turmaName = examsRes.rows[0]?.turmaname || 'Todas as turmas'
 
   const pdfBytes = await generateTurmaReportPdf({
     turmaName,
@@ -139,7 +194,7 @@ export async function GET(request: NextRequest) {
 
   const filename = `relatorio-${turmaName.replace(/\s+/g, '_')}.pdf`
 
-  return new NextResponse(pdfBytes as Buffer, {
+  return new NextResponse(pdfBytes as unknown as BodyInit, {
     headers: {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,

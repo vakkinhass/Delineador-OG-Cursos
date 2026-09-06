@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { requireAdmin } from '@/lib/auth'
 
 // PUT /api/turmas/[id] - Atualiza turma (Admin)
@@ -25,14 +25,20 @@ export async function PUT(
       return NextResponse.json({ error: 'Nome da turma é obrigatório.' }, { status: 400 })
     }
 
-    const existing = await db.turma.findFirst({
-      where: { name, NOT: { id } },
-    })
-    if (existing) {
+    const existing = await query(
+      'SELECT id FROM "Turma" WHERE name = $1 AND id <> $2',
+      [name, id]
+    )
+    if (existing.rowCount && existing.rowCount > 0) {
       return NextResponse.json({ error: 'Já existe uma turma com este nome.' }, { status: 409 })
     }
 
-    await db.turma.update({ where: { id }, data: { name, description, active } })
+    await query(
+      `UPDATE "Turma"
+          SET name = $1, description = $2, active = $3, "updatedAt" = NOW()
+        WHERE id = $4`,
+      [name, description, active, id]
+    )
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Update turma error:', error)
@@ -54,7 +60,7 @@ export async function DELETE(
   const { id } = await params
 
   try {
-    await db.turma.delete({ where: { id } })
+    await query('DELETE FROM "Turma" WHERE id = $1', [id])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Delete turma error:', error)

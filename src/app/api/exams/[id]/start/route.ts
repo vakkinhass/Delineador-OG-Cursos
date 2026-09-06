@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { getCurrentUser } from '@/lib/auth'
 
 // POST /api/exams/[id]/start
@@ -17,35 +17,42 @@ export async function POST(
   const { id } = await params
   const now = new Date()
 
-  const exam = await db.exam.findUnique({
-    where: { id },
-    include: {
-      assignments: { where: { userId: user.id } },
-      questions: { orderBy: { order: 'asc' }, include: { question: { include: { subject: { select: { name: true } } } } } },
-    },
-  })
-
-  if (!exam) {
+  const examRes = await query(
+    `SELECT id, "turmaId", "startDateTime", "endDateTime", "durationMinutes"
+       FROM "Exam" WHERE id = $1`,
+    [id]
+  )
+  if (examRes.rows.length === 0) {
     return NextResponse.json({ error: 'Prova não encontrada.' }, { status: 404 })
   }
+  const exam = examRes.rows[0]
 
-  // Verificar acesso do aluno
-  const userTurmas = await db.userTurma.findMany({
-    where: { userId: user.id },
-    select: { turmaId: true },
-  })
-  const turmaIds = userTurmas.map((t) => t.turmaId)
-  const assignment = exam.assignments[0]
-  const isInTurma = exam.turmaId && turmaIds.includes(exam.turmaId)
+  // Buscar atribuição individual (se houver)
+  const assignmentRes = await query(
+    `SELECT "startDateTime" AS startdatetime, "endDateTime" AS enddatetime,
+            "durationMinutes" AS durationminutes
+       FROM "ExamAssignment"
+      WHERE "examId" = $1 AND "userId" = $2`,
+    [id, user.id]
+  )
+  const assignment = assignmentRes.rows[0] || null
+
+  // Verificar acesso do aluno (turma OU atribuição)
+  const userTurmasRes = await query(
+    'SELECT "turmaId" AS turmaid FROM "UserTurma" WHERE "userId" = $1',
+    [user.id]
+  )
+  const turmaIds = userTurmasRes.rows.map((t) => t.turmaid)
+  const isInTurma = exam.turmaid && turmaIds.includes(exam.turmaid)
 
   if (!assignment && !isInTurma) {
     return NextResponse.json({ error: 'Você não tem acesso a esta prova.' }, { status: 403 })
   }
 
   // Janela de tempo efetiva
-  const effectiveStart = assignment ? assignment.startDateTime : exam.startDateTime
-  const effectiveEnd = assignment ? assignment.endDateTime : exam.endDateTime
-  const effectiveDuration = assignment?.durationMinutes || exam.durationMinutes
+  const effectiveStart = assignment ? new Date(assignment.startdatetime) : new Date(exam.startdatetime)
+  const effectiveEnd = assignment ? new Date(assignment.enddatetime) : new Date(exam.enddatetime)
+  const effectiveDuration = assignment?.durationminutes || exam.durationminutes
 
   if (now < effectiveStart) {
     return NextResponse.json({
@@ -64,10 +71,26 @@ export async function POST(
     }, { status: 403 })
   }
 
-  // Verificar se já existe resultado submetido
-  const existing = await db.examResult.findUnique({
-    where: { examId_userId: { examId: id, userId: user.id } },
-  })
+  // Buscar questões da prova
+  const questionsRes = await query(
+    `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+            s.name AS "subjectName"
+       FROM "ExamQuestion" eq
+       JOIN "Question" q ON q.id = eq."questionId"
+       LEFT JOIN "Subject" s ON s.id = q."subjectId"
+      WHERE eq."examId" = $1
+      ORDER BY eq."order" ASC`,
+    [id]
+  )
+
+  // Verificar se já existe resultado
+  const existingRes = await query(
+    `SELECT id, answers, status, "startedAt" AS startedat, "totalQuestions" AS totalquestions
+       FROM "ExamResult"
+      WHERE "examId" = $1 AND "userId" = $2`,
+    [id, user.id]
+  )
+  const existing = existingRes.rows[0] || null
 
   if (existing && (existing.status === 'SUBMITTED' || existing.status === 'AUTO_SUBMITTED')) {
     return NextResponse.json({
@@ -78,41 +101,59 @@ export async function POST(
   }
 
   // Criar ou atualizar resultado
-  const result = await db.examResult.upsert({
-    where: { examId_userId: { examId: id, userId: user.id } },
-    update: {
-      status: 'IN_PROGRESS',
-      startedAt: existing?.startedAt || now,
-    },
-    create: {
-      examId: id,
-      userId: user.id,
-      status: 'IN_PROGRESS',
-      startedAt: now,
-      totalQuestions: exam.questions.length,
-    },
-  })
+  let resultId: string
+  let startedAt: Date
+  if (existing) {
+    startedAt = existing.startedat ? new Date(existing.startedat) : now
+    await query(
+      `UPDATE "ExamResult"
+          SET status = 'IN_PROGRESS', "startedAt" = $3, "updatedAt" = NOW()
+        WHERE id = $1 AND "userId" = $2`,
+      [existing.id, user.id, startedAt]
+    )
+    resultId = existing.id
+  } else {
+    resultId = generateId()
+    startedAt = now
+    await query(
+      `INSERT INTO "ExamResult" (id, "examId", "userId", answers, score,
+           "correctCount", "totalQuestions", "timeSpentSeconds",
+           "startedAt", "submittedAt", status, "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, '{}', 0, 0, $4, 0, $5, NULL, 'IN_PROGRESS', NOW(), NOW())`,
+      [resultId, id, user.id, questionsRes.rows.length, startedAt]
+    )
+  }
 
   // Calcular tempo limite (o que terminar primeiro: duração ou fim da janela)
-  const deadlineByDuration = new Date(result.startedAt!.getTime() + effectiveDuration * 60 * 1000)
+  const deadlineByDuration = new Date(startedAt.getTime() + effectiveDuration * 60 * 1000)
   const deadline = deadlineByDuration < effectiveEnd ? deadlineByDuration : effectiveEnd
 
+  // Parsear respostas salvas (se houver)
+  let savedAnswers = {}
+  if (existing?.answers) {
+    try {
+      savedAnswers = JSON.parse(existing.answers)
+    } catch {
+      savedAnswers = {}
+    }
+  }
+
   return NextResponse.json({
-    resultId: result.id,
-    startedAt: result.startedAt!.toISOString(),
+    resultId,
+    startedAt: startedAt.toISOString(),
     deadline: deadline.toISOString(),
     durationMinutes: effectiveDuration,
-    totalQuestions: exam.questions.length,
-    questions: exam.questions.map((eq, index) => ({
-      id: eq.question.id,
+    totalQuestions: questionsRes.rows.length,
+    questions: questionsRes.rows.map((q, index) => ({
+      id: q.id,
       index: index + 1,
-      subjectName: eq.question.subject.name,
-      statement: eq.question.statement,
-      optionA: eq.question.optionA,
-      optionB: eq.question.optionB,
-      optionC: eq.question.optionC,
-      optionD: eq.question.optionD,
+      subjectName: q.subjectname,
+      statement: q.statement,
+      optionA: q.optiona,
+      optionB: q.optionb,
+      optionC: q.optionc,
+      optionD: q.optiond,
     })),
-    savedAnswers: existing?.answers ? JSON.parse(existing.answers) : {},
+    savedAnswers,
   })
 }

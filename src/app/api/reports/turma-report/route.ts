@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { requireAdmin } from '@/lib/auth'
 
 // Nota de corte da escola: 6,0 (60%)
@@ -20,75 +20,123 @@ export async function GET(request: NextRequest) {
   const turmaId = searchParams.get('turmaId')
 
   // Buscar provas oficiais (não de recuperação) da turma
-  const examWhere: { isRecovery: boolean; turmaId?: string } = { isRecovery: false }
-  if (turmaId) examWhere.turmaId = turmaId
+  const params: any[] = []
+  const conditions = [`e."isRecovery" = false`]
+  if (turmaId) {
+    params.push(turmaId)
+    conditions.push(`e."turmaId" = $${params.length}`)
+  }
 
-  const exams = await db.exam.findMany({
-    where: examWhere,
-    orderBy: { startDateTime: 'asc' },
-    include: {
-      turma: { select: { name: true } },
-      subject: { select: { name: true } },
-      _count: { select: { questions: true } },
-      results: {
-        where: { status: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              cpf: true,
-              turmas: { include: { turma: { select: { name: true } } } },
-            },
-          },
-        },
-      },
-      recoveryExams: {
-        include: {
-          results: {
-            where: { status: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
-            select: {
-              userId: true,
-              score: true,
-              correctCount: true,
-              totalQuestions: true,
-              timeSpentSeconds: true,
-              submittedAt: true,
-            },
-          },
-        },
-      },
-    },
-  })
+  const examsRes = await query(
+    `SELECT e.id, e.title, e."startDateTime" AS startdatetime,
+            t.name AS "turmaName", s.name AS "subjectName"
+       FROM "Exam" e
+       LEFT JOIN "Turma" t ON t.id = e."turmaId"
+       LEFT JOIN "Subject" s ON s.id = e."subjectId"
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY e."startDateTime" ASC`,
+    params
+  )
+
+  const examIds = examsRes.rows.map((e) => e.id)
+
+  // Contar questões por prova
+  let questionCounts: Record<string, number> = {}
+  if (examIds.length > 0) {
+    const qCountRes = await query(
+      `SELECT "examId" AS examid, COUNT(*)::int AS count
+         FROM "ExamQuestion"
+        WHERE "examId" = ANY($1::text[])
+        GROUP BY "examId"`,
+      [examIds]
+    )
+    for (const row of qCountRes.rows) questionCounts[row.examid] = row.count
+  }
+
+  // Buscar resultados submetidos (provas oficiais)
+  let resultsByExam: Record<string, any[]> = {}
+  if (examIds.length > 0) {
+    const resultsRes = await query(
+      `SELECT r.id, r."examId" AS examid, r."userId" AS userid, r.score,
+              r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
+              r."timeSpentSeconds" AS timespentseconds, r."submittedAt" AS submittedat,
+              u.name AS "userName", u.cpf AS "userCpf"
+         FROM "ExamResult" r
+         JOIN "User" u ON u.id = r."userId"
+        WHERE r."examId" = ANY($1::text[])
+          AND r.status IN ('SUBMITTED', 'AUTO_SUBMITTED')`,
+      [examIds]
+    )
+    for (const row of resultsRes.rows) {
+      if (!resultsByExam[row.examid]) resultsByExam[row.examid] = []
+      resultsByExam[row.examid].push(row)
+    }
+  }
+
+  // Buscar provas de recuperação vinculadas às provas oficiais
+  let recoveryExamsByOriginal: Record<string, any[]> = {}
+  if (examIds.length > 0) {
+    const recoveryExamsRes = await query(
+      `SELECT id, "recoveryForExamId" AS recoveryforexamid
+         FROM "Exam"
+        WHERE "isRecovery" = true AND "recoveryForExamId" = ANY($1::text[])`,
+      [examIds]
+    )
+    const recoveryExamIds = recoveryExamsRes.rows.map((r) => r.id)
+    let recoveryResultsByRecoveryExam: Record<string, any[]> = {}
+    if (recoveryExamIds.length > 0) {
+      const recoveryResultsRes = await query(
+        `SELECT "examId" AS examid, "userId" AS userid, score,
+                "correctCount" AS correctcount, "totalQuestions" AS totalquestions,
+                "timeSpentSeconds" AS timespentseconds, "submittedAt" AS submittedat
+           FROM "ExamResult"
+          WHERE "examId" = ANY($1::text[])
+            AND status IN ('SUBMITTED', 'AUTO_SUBMITTED')`,
+        [recoveryExamIds]
+      )
+      for (const row of recoveryResultsRes.rows) {
+        if (!recoveryResultsByRecoveryExam[row.examid]) recoveryResultsByRecoveryExam[row.examid] = []
+        recoveryResultsByRecoveryExam[row.examid].push(row)
+      }
+    }
+    for (const re of recoveryExamsRes.rows) {
+      if (!recoveryExamsByOriginal[re.recoveryforexamid]) recoveryExamsByOriginal[re.recoveryforexamid] = []
+      recoveryExamsByOriginal[re.recoveryforexamid].push({
+        id: re.id,
+        results: recoveryResultsByRecoveryExam[re.id] || [],
+      })
+    }
+  }
 
   // Buscar alunos da turma
   let students: { id: string; name: string; cpf: string }[] = []
   if (turmaId) {
-    const userTurmas = await db.userTurma.findMany({
-      where: { turmaId },
-      include: { user: { select: { id: true, name: true, cpf: true } } },
-      orderBy: { user: { name: 'asc' } },
-    })
-    students = userTurmas.map((ut) => ({
-      id: ut.user.id,
-      name: ut.user.name,
-      cpf: ut.user.cpf,
+    const userTurmasRes = await query(
+      `SELECT u.id, u.name, u.cpf
+         FROM "UserTurma" ut
+         JOIN "User" u ON u.id = ut."userId"
+        WHERE ut."turmaId" = $1
+        ORDER BY u.name ASC`,
+      [turmaId]
+    )
+    students = userTurmasRes.rows.map((u) => ({
+      id: u.id, name: u.name, cpf: u.cpf,
     }))
   }
 
   // Construir o relatório: para cada prova, lista de alunos com seus resultados
-  const examReports = exams.map((exam) => {
+  const examReports = examsRes.rows.map((exam) => {
     // Mapa de resultados de recuperação por userId
     const recoveryByUser: Record<string, any> = {}
-    for (const recExam of exam.recoveryExams) {
+    for (const recExam of (recoveryExamsByOriginal[exam.id] || [])) {
       for (const recResult of recExam.results) {
-        recoveryByUser[recResult.userId] = recResult
+        recoveryByUser[recResult.userid] = recResult
       }
     }
 
-    const rows = exam.results.map((r) => {
+    const rows = (resultsByExam[exam.id] || []).map((r) => {
       const originalScore = r.score
-      const recoveryResult = recoveryByUser[r.userId]
+      const recoveryResult = recoveryByUser[r.userid]
       const recoveryScore = recoveryResult?.score ?? null
 
       // Cálculo da média final
@@ -118,21 +166,21 @@ export async function GET(request: NextRequest) {
       }
 
       // Formatar data e horário
-      const submittedDate = r.submittedAt ? new Date(r.submittedAt) : null
+      const submittedDate = r.submittedat ? new Date(r.submittedat) : null
       const dataProva = submittedDate
         ? submittedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
         : '—'
       const horario = submittedDate
         ? submittedDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
         : '—'
-      const duracao = r.timeSpentSeconds
-        ? `${Math.floor(r.timeSpentSeconds / 60)}min ${r.timeSpentSeconds % 60}s`
+      const duracao = r.timespentseconds
+        ? `${Math.floor(r.timespentseconds / 60)}min ${r.timespentseconds % 60}s`
         : '—'
 
       return {
-        userId: r.user.id,
-        nome: r.user.name,
-        cpf: r.user.cpf,
+        userId: r.userid,
+        nome: r.username,
+        cpf: r.usercpf,
         dataProva,
         horario,
         duracao,
@@ -153,10 +201,10 @@ export async function GET(request: NextRequest) {
     return {
       examId: exam.id,
       title: exam.title,
-      turmaName: exam.turma?.name || 'Sem turma',
-      subjectName: exam.subject?.name || 'Multi',
-      startDateTime: exam.startDateTime.toISOString(),
-      questionCount: exam._count.questions,
+      turmaName: exam.turmaname || 'Sem turma',
+      subjectName: exam.subjectname || 'Multi',
+      startDateTime: new Date(exam.startdatetime).toISOString(),
+      questionCount: questionCounts[exam.id] || 0,
       totalAlunos: rows.length,
       aprovados,
       reprovados,
@@ -172,7 +220,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     turmaId,
-    turmaName: exams[0]?.turma?.name || 'Todas as turmas',
+    turmaName: examsRes.rows[0]?.turmaname || 'Todas as turmas',
     notaCorte: NOTA_CORTE,
     examReports,
     students,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { getCurrentUser, requireAdmin } from '@/lib/auth'
 
 // GET /api/exams - Lista provas
@@ -15,104 +15,161 @@ export async function GET(request: NextRequest) {
 
   if (user.role === 'ADMIN') {
     // Admin vê todas (ou filtra por turma)
-    const where = turmaId ? { turmaId } : {}
-    const exams = await db.exam.findMany({
-      where,
-      orderBy: { startDateTime: 'desc' },
-      include: {
-        turma: { select: { name: true } },
-        subject: { select: { name: true } },
-        _count: { select: { questions: true, assignments: true } },
-      },
-    })
+    const examsRes = await query(
+      `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
+              e."startDateTime", e."endDateTime", e."durationMinutes",
+              e.active, e."isRecovery",
+              t.name AS "turmaName", s.name AS "subjectName"
+         FROM "Exam" e
+         LEFT JOIN "Turma" t ON t.id = e."turmaId"
+         LEFT JOIN "Subject" s ON s.id = e."subjectId"
+         ${turmaId ? 'WHERE e."turmaId" = $1' : ''}
+        ORDER BY e."startDateTime" DESC`,
+      turmaId ? [turmaId] : []
+    )
+
+    const examIds = examsRes.rows.map((e) => e.id)
+    let questionCounts: Record<string, number> = {}
+    let assignmentCounts: Record<string, number> = {}
+    if (examIds.length > 0) {
+      const qCountRes = await query(
+        `SELECT "examId" AS examid, COUNT(*)::int AS count
+           FROM "ExamQuestion"
+          WHERE "examId" = ANY($1::text[])
+          GROUP BY "examId"`,
+        [examIds]
+      )
+      for (const row of qCountRes.rows) questionCounts[row.examid] = row.count
+
+      const aCountRes = await query(
+        `SELECT "examId" AS examid, COUNT(*)::int AS count
+           FROM "ExamAssignment"
+          WHERE "examId" = ANY($1::text[])
+          GROUP BY "examId"`,
+        [examIds]
+      )
+      for (const row of aCountRes.rows) assignmentCounts[row.examid] = row.count
+    }
 
     return NextResponse.json({
-      exams: exams.map((e) => ({
+      exams: examsRes.rows.map((e) => ({
         id: e.id,
         title: e.title,
         description: e.description,
-        turmaId: e.turmaId,
-        turmaName: e.turma?.name || null,
-        subjectId: e.subjectId,
-        subjectName: e.subject?.name || null,
-        startDateTime: e.startDateTime.toISOString(),
-        endDateTime: e.endDateTime.toISOString(),
-        durationMinutes: e.durationMinutes,
+        turmaId: e.turmaid,
+        turmaName: e.turmaname || null,
+        subjectId: e.subjectid,
+        subjectName: e.subjectname || null,
+        startDateTime: new Date(e.startdatetime).toISOString(),
+        endDateTime: new Date(e.enddatetime).toISOString(),
+        durationMinutes: e.durationminutes,
         active: e.active,
-        isRecovery: e.isRecovery,
-        questionCount: e._count.questions,
-        assignmentCount: e._count.assignments,
+        isRecovery: e.isrecovery,
+        questionCount: questionCounts[e.id] || 0,
+        assignmentCount: assignmentCounts[e.id] || 0,
       })),
     })
   }
 
   // ALUNO: vê provas da sua turma + atribuições individuais
-  const userTurmas = await db.userTurma.findMany({
-    where: { userId: user.id },
-    select: { turmaId: true },
-  })
-  const turmaIds = userTurmas.map((t) => t.turmaId)
+  const userTurmasRes = await query(
+    'SELECT "turmaId" AS turmaid FROM "UserTurma" WHERE "userId" = $1',
+    [user.id]
+  )
+  const turmaIds = userTurmasRes.rows.map((t) => t.turmaid)
 
   // Provas da turma do aluno
-  const turmaExams = await db.exam.findMany({
-    where: { turmaId: { in: turmaIds }, active: true },
-    orderBy: { startDateTime: 'desc' },
-    include: {
-      turma: { select: { name: true } },
-      subject: { select: { name: true } },
-      _count: { select: { questions: true } },
-      results: { where: { userId: user.id }, select: { id: true, status: true, score: true } },
-    },
-  })
+  let turmaExamsRows: any[] = []
+  if (turmaIds.length > 0) {
+    const turmaExamsRes = await query(
+      `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
+              e."startDateTime", e."endDateTime", e."durationMinutes",
+              e.active, e."isRecovery",
+              t.name AS "turmaName", s.name AS "subjectName"
+         FROM "Exam" e
+         LEFT JOIN "Turma" t ON t.id = e."turmaId"
+         LEFT JOIN "Subject" s ON s.id = e."subjectId"
+        WHERE e."turmaId" = ANY($1::text[]) AND e.active = true
+        ORDER BY e."startDateTime" DESC`,
+      [turmaIds]
+    )
+    turmaExamsRows = turmaExamsRes.rows
+  }
 
   // Provas atribuídas individualmente
-  const assignments = await db.examAssignment.findMany({
-    where: { userId: user.id },
-    include: {
-      exam: {
-        include: {
-          subject: { select: { name: true } },
-          _count: { select: { questions: true } },
-          results: { where: { userId: user.id }, select: { id: true, status: true, score: true } },
-        },
-      },
-    },
-  })
+  const assignmentsRes = await query(
+    `SELECT a."examId" AS examid, a."startDateTime" AS startdatetime,
+            a."endDateTime" AS enddatetime, a."durationMinutes" AS durationminutes,
+            e.title, e.description, e."subjectId" AS subjectid,
+            e.active, e."isRecovery" AS isrecovery,
+            s.name AS "subjectName"
+       FROM "ExamAssignment" a
+       JOIN "Exam" e ON e.id = a."examId"
+       LEFT JOIN "Subject" s ON s.id = e."subjectId"
+      WHERE a."userId" = $1`,
+    [user.id]
+  )
 
-  const assignedExams = assignments.map((a) => ({
-    id: a.exam.id,
-    title: a.exam.title,
-    description: a.exam.description,
+  const allExamIds = [
+    ...turmaExamsRows.map((e) => e.id),
+    ...assignmentsRes.rows.map((a) => a.examid),
+  ]
+
+  let questionCounts: Record<string, number> = {}
+  let resultsByExam: Record<string, any> = {}
+  if (allExamIds.length > 0) {
+    const qCountRes = await query(
+      `SELECT "examId" AS examid, COUNT(*)::int AS count
+         FROM "ExamQuestion"
+        WHERE "examId" = ANY($1::text[])
+        GROUP BY "examId"`,
+      [allExamIds]
+    )
+    for (const row of qCountRes.rows) questionCounts[row.examid] = row.count
+
+    const resultsRes = await query(
+      `SELECT id, "examId" AS examid, status, score
+         FROM "ExamResult"
+        WHERE "userId" = $1 AND "examId" = ANY($2::text[])`,
+      [user.id, allExamIds]
+    )
+    for (const row of resultsRes.rows) resultsByExam[row.examid] = row
+  }
+
+  const assignedExams = assignmentsRes.rows.map((a) => ({
+    id: a.examid,
+    title: a.title,
+    description: a.description,
     turmaId: null,
     turmaName: 'Prova Individual',
-    subjectId: a.exam.subjectId,
-    subjectName: a.exam.subject?.name || null,
-    startDateTime: a.startDateTime.toISOString(),
-    endDateTime: a.endDateTime.toISOString(),
-    durationMinutes: a.durationMinutes || a.exam.durationMinutes,
-    active: a.exam.active,
-    isRecovery: a.exam.isRecovery,
-    questionCount: a.exam._count.questions,
+    subjectId: a.subjectid,
+    subjectName: a.subjectname || null,
+    startDateTime: new Date(a.startdatetime).toISOString(),
+    endDateTime: new Date(a.enddatetime).toISOString(),
+    durationMinutes: a.durationminutes || null,
+    active: a.active,
+    isRecovery: a.isrecovery,
+    questionCount: questionCounts[a.examid] || 0,
     isAssigned: true,
-    result: a.exam.results[0] || null,
+    result: resultsByExam[a.examid] || null,
   }))
 
-  const turmaExamsFormatted = turmaExams.map((e) => ({
+  const turmaExamsFormatted = turmaExamsRows.map((e) => ({
     id: e.id,
     title: e.title,
     description: e.description,
-    turmaId: e.turmaId,
-    turmaName: e.turma?.name || null,
-    subjectId: e.subjectId,
-    subjectName: e.subject?.name || null,
-    startDateTime: e.startDateTime.toISOString(),
-    endDateTime: e.endDateTime.toISOString(),
-    durationMinutes: e.durationMinutes,
+    turmaId: e.turmaid,
+    turmaName: e.turmaname || null,
+    subjectId: e.subjectid,
+    subjectName: e.subjectname || null,
+    startDateTime: new Date(e.startdatetime).toISOString(),
+    endDateTime: new Date(e.enddatetime).toISOString(),
+    durationMinutes: e.durationminutes,
     active: e.active,
-    isRecovery: e.isRecovery,
-    questionCount: e._count.questions,
+    isRecovery: e.isrecovery,
+    questionCount: questionCounts[e.id] || 0,
     isAssigned: false,
-    result: e.results[0] || null,
+    result: resultsByExam[e.id] || null,
   }))
 
   return NextResponse.json({
@@ -157,47 +214,50 @@ export async function POST(request: NextRequest) {
     // Selecionar questões: IDs específicos OU por disciplina/dificuldade
     let selectedQuestionIds = questionIds
     if (selectedQuestionIds.length === 0) {
-      const where: { subjectId?: { in: string[] }; difficulty?: string } = {}
-      if (subjectIds.length > 0) where.subjectId = { in: subjectIds }
-      if (difficulty !== 'ANY') where.difficulty = difficulty
+      const params: any[] = []
+      const conditions: string[] = []
+      if (subjectIds.length > 0) {
+        params.push(subjectIds)
+        conditions.push(`"subjectId" = ANY($${params.length}::text[])`)
+      }
+      if (difficulty !== 'ANY') {
+        params.push(difficulty)
+        conditions.push(`difficulty = $${params.length}`)
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-      const candidates = await db.question.findMany({
-        where,
-        select: { id: true },
-      })
+      const candidatesRes = await query(`SELECT id FROM "Question" ${where}`, params)
+      const candidates = candidatesRes.rows.map((r) => r.id)
 
       // Embaralhar e pegar N
       const shuffled = [...candidates].sort(() => Math.random() - 0.5)
-      selectedQuestionIds = shuffled.slice(0, Math.min(questionCount, shuffled.length)).map((q) => q.id)
+      selectedQuestionIds = shuffled.slice(0, Math.min(questionCount, shuffled.length))
     }
 
     if (selectedQuestionIds.length === 0) {
       return NextResponse.json({ error: 'Nenhuma questão selecionada para a prova.' }, { status: 400 })
     }
 
-    const exam = await db.exam.create({
-      data: {
-        title,
-        description,
-        turmaId,
-        subjectId,
-        startDateTime,
-        endDateTime,
-        durationMinutes,
-        active: true,
-        questions: {
-          create: selectedQuestionIds.map((questionId, index) => ({
-            questionId,
-            order: index,
-          })),
-        },
-      },
-      include: { _count: { select: { questions: true } } },
-    })
+    const examId = generateId()
+    await query(
+      `INSERT INTO "Exam" (id, title, description, "turmaId", "subjectId",
+           "startDateTime", "endDateTime", "durationMinutes", active,
+           "isRecovery", "recoveryForExamId", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, false, NULL, NOW(), NOW())`,
+      [examId, title, description, turmaId, subjectId, startDateTime, endDateTime, durationMinutes]
+    )
+
+    for (let i = 0; i < selectedQuestionIds.length; i++) {
+      await query(
+        `INSERT INTO "ExamQuestion" (id, "examId", "questionId", "order")
+         VALUES ($1, $2, $3, $4)`,
+        [generateId(), examId, selectedQuestionIds[i], i]
+      )
+    }
 
     return NextResponse.json({
       success: true,
-      exam: { id: exam.id, title: exam.title, questionCount: exam._count.questions },
+      exam: { id: examId, title, questionCount: selectedQuestionIds.length },
     })
   } catch (error) {
     console.error('Create exam error:', error)

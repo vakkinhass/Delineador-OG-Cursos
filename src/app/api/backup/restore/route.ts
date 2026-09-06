@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { requireAdmin, maskCpf, sanitizeCpf } from '@/lib/auth'
 
 // POST /api/backup/restore
@@ -20,19 +20,22 @@ export async function POST(request: NextRequest) {
 
     let created = 0
     let skipped = 0
-    let errors: string[] = []
+    const errors: string[] = []
 
     // Primeiro, criar/atualizar turmas
     const turmaMap: Record<string, string> = {}
     for (const t of turmasToImport) {
-      const existing = await db.turma.findUnique({ where: { name: t.name } })
-      if (existing) {
-        turmaMap[t.name] = existing.id
+      const existing = await query('SELECT id FROM "Turma" WHERE name = $1', [t.name])
+      if (existing.rowCount && existing.rowCount > 0) {
+        turmaMap[t.name] = existing.rows[0].id
       } else {
-        const created = await db.turma.create({
-          data: { name: t.name, description: t.description || null, active: t.active !== false },
-        })
-        turmaMap[t.name] = created.id
+        const newId = generateId()
+        await query(
+          `INSERT INTO "Turma" (id, name, description, active, "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+          [newId, t.name, t.description || null, t.active !== false]
+        )
+        turmaMap[t.name] = newId
       }
     }
 
@@ -45,8 +48,8 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        const existing = await db.user.findUnique({ where: { cpf } })
-        if (existing) {
+        const existing = await query('SELECT id FROM "User" WHERE cpf = $1', [cpf])
+        if (existing.rowCount && existing.rowCount > 0) {
           skipped++
           continue
         }
@@ -58,25 +61,28 @@ export async function POST(request: NextRequest) {
             userTurmaIds.push(turmaMap[turmaName])
           } else {
             // Buscar turma existente no banco
-            const turma = await db.turma.findUnique({ where: { name: turmaName } })
-            if (turma) {
-              turmaMap[turmaName] = turma.id
-              userTurmaIds.push(turma.id)
+            const turmaRes = await query('SELECT id FROM "Turma" WHERE name = $1', [turmaName])
+            if (turmaRes.rows.length > 0) {
+              turmaMap[turmaName] = turmaRes.rows[0].id
+              userTurmaIds.push(turmaRes.rows[0].id)
             }
           }
         }
 
-        await db.user.create({
-          data: {
-            cpf,
-            name: u.name,
-            role: u.role === 'ADMIN' ? 'ADMIN' : 'STUDENT',
-            active: u.active !== false,
-            turmas: userTurmaIds.length > 0
-              ? { create: userTurmaIds.map((turmaId) => ({ turmaId })) }
-              : undefined,
-          },
-        })
+        const userId = generateId()
+        await query(
+          `INSERT INTO "User" (id, cpf, name, role, active, "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+          [userId, cpf, u.name, u.role === 'ADMIN' ? 'ADMIN' : 'STUDENT', u.active !== false]
+        )
+
+        for (const turmaId of userTurmaIds) {
+          await query(
+            `INSERT INTO "UserTurma" (id, "userId", "turmaId", "enrolledAt")
+             VALUES ($1, $2, $3, NOW())`,
+            [generateId(), userId, turmaId]
+          )
+        }
         created++
       } catch (err: any) {
         errors.push(`Erro ao importar ${u.name || u.cpf}: ${err.message}`)

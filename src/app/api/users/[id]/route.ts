@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { requireAdmin, maskCpf, sanitizeCpf } from '@/lib/auth'
 
 // PUT /api/users/[id] - Atualiza usuário (Admin)
@@ -29,28 +29,35 @@ export async function PUT(
     }
 
     // Verificar CPF duplicado
-    const existing = await db.user.findFirst({
-      where: { cpf, NOT: { id } },
-    })
-    if (existing) {
+    const existing = await query(
+      'SELECT id FROM "User" WHERE cpf = $1 AND id <> $2',
+      [cpf, id]
+    )
+    if (existing.rowCount && existing.rowCount > 0) {
       return NextResponse.json({ error: 'CPF já cadastrado em outro usuário.' }, { status: 409 })
     }
 
-    // Atualizar usuário e turmas (transação)
-    await db.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id },
-        data: { name, cpf, role, active },
-      })
-      // Remover turmas antigas
-      await tx.userTurma.deleteMany({ where: { userId: id } })
-      // Adicionar novas
-      if (turmaIds.length > 0) {
-        await tx.userTurma.createMany({
-          data: turmaIds.map((turmaId) => ({ userId: id, turmaId })),
-        })
+    // Atualizar usuário
+    await query(
+      `UPDATE "User"
+          SET name = $1, cpf = $2, role = $3, active = $4, "updatedAt" = NOW()
+        WHERE id = $5`,
+      [name, cpf, role, active, id]
+    )
+
+    // Remover turmas antigas
+    await query('DELETE FROM "UserTurma" WHERE "userId" = $1', [id])
+
+    // Adicionar novas
+    if (turmaIds.length > 0) {
+      for (const turmaId of turmaIds) {
+        await query(
+          `INSERT INTO "UserTurma" (id, "userId", "turmaId", "enrolledAt")
+           VALUES ($1, $2, $3, NOW())`,
+          [generateId(), id, turmaId]
+        )
       }
-    })
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -73,7 +80,7 @@ export async function DELETE(
   const { id } = await params
 
   try {
-    await db.user.delete({ where: { id } })
+    await query('DELETE FROM "User" WHERE id = $1', [id])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Delete user error:', error)

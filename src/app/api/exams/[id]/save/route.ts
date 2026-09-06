@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { getCurrentUser } from '@/lib/auth'
 
 // POST /api/exams/[id]/save
@@ -19,9 +19,13 @@ export async function POST(
     const body = await request.json()
     const answers = body.answers || {}
 
-    const existing = await db.examResult.findUnique({
-      where: { examId_userId: { examId: id, userId: user.id } },
-    })
+    const existingRes = await query(
+      `SELECT id, status
+         FROM "ExamResult"
+        WHERE "examId" = $1 AND "userId" = $2`,
+      [id, user.id]
+    )
+    const existing = existingRes.rows[0]
 
     if (!existing) {
       return NextResponse.json({ error: 'Prova não iniciada.' }, { status: 400 })
@@ -31,10 +35,12 @@ export async function POST(
       return NextResponse.json({ error: 'Prova já finalizada.' }, { status: 400 })
     }
 
-    await db.examResult.update({
-      where: { id: existing.id },
-      data: { answers: JSON.stringify(answers), updatedAt: new Date() },
-    })
+    await query(
+      `UPDATE "ExamResult"
+          SET answers = $1, "updatedAt" = NOW()
+        WHERE id = $2`,
+      [JSON.stringify(answers), existing.id]
+    )
 
     return NextResponse.json({ success: true, savedAt: new Date().toISOString() })
   } catch (error) {

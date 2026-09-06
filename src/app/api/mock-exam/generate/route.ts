@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { getCurrentUser } from '@/lib/auth'
-import type { AnswerOption } from '@/lib/types'
 
 // POST /api/mock-exam/generate
 // Gera um simulado livre sob demanda.
@@ -20,22 +19,31 @@ export async function POST(request: NextRequest) {
     const count: number = Math.min(Math.max(body.count || 10, 1), 50)
 
     // Construir filtros
-    const where: { subjectId?: { in: string[] }; difficulty?: string } = {}
+    const params: any[] = []
+    const conditions: string[] = []
     if (subjectIds.length > 0) {
-      where.subjectId = { in: subjectIds }
+      params.push(subjectIds)
+      conditions.push(`q."subjectId" = ANY($${params.length}::text[])`)
     }
     if (difficulty !== 'ANY') {
-      where.difficulty = difficulty
+      params.push(difficulty)
+      conditions.push(`q.difficulty = $${params.length}`)
     }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
     // Buscar questões (buscamos mais do que o necessário para embaralhar)
-    const allQuestions = await db.question.findMany({
-      where,
-      include: { subject: { select: { name: true } } },
-      orderBy: { id: 'asc' },
-    })
+    const allQuestionsRes = await query(
+      `SELECT q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
+              q."optionA", q."optionB", q."optionC", q."optionD",
+              s.name AS "subjectName"
+         FROM "Question" q
+         LEFT JOIN "Subject" s ON s.id = q."subjectId"
+         ${where}
+        ORDER BY q.id ASC`,
+      params
+    )
 
-    if (allQuestions.length === 0) {
+    if (allQuestionsRes.rows.length === 0) {
       return NextResponse.json(
         { error: 'Nenhuma questão encontrada com os filtros selecionados.' },
         { status: 404 }
@@ -43,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Embaralhar (Fisher-Yates) e selecionar
-    const shuffled = [...allQuestions]
+    const shuffled = [...allQuestionsRes.rows]
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
@@ -54,14 +62,14 @@ export async function POST(request: NextRequest) {
     const questions = selected.map((q, index) => ({
       id: q.id,
       index: index + 1,
-      subjectId: q.subjectId,
-      subjectName: q.subject.name,
+      subjectId: q.subjectid,
+      subjectName: q.subjectname,
       difficulty: q.difficulty,
       statement: q.statement,
-      optionA: q.optionA,
-      optionB: q.optionB,
-      optionC: q.optionC,
-      optionD: q.optionD,
+      optionA: q.optiona,
+      optionB: q.optionb,
+      optionC: q.optionc,
+      optionD: q.optiond,
     }))
 
     return NextResponse.json({
@@ -77,6 +85,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
-// POST /api/mock-exam/generate/grade
-// Não usado - a correção é feita no submit abaixo

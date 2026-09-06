@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query, generateId } from '@/lib/db-pg'
 import { requireAdmin, maskCpf, sanitizeCpf } from '@/lib/auth'
 
 // POST /api/users/bulk-import
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     let created = 0
     let skipped = 0
-    let errors: string[] = []
+    const errors: string[] = []
 
     for (const s of students) {
       try {
@@ -37,21 +37,26 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        const existing = await db.user.findUnique({ where: { cpf } })
-        if (existing) {
+        const existing = await query('SELECT id FROM "User" WHERE cpf = $1', [cpf])
+        if (existing.rowCount && existing.rowCount > 0) {
           skipped++
           continue
         }
 
-        await db.user.create({
-          data: {
-            cpf,
-            name,
-            role: 'STUDENT',
-            active: true,
-            turmas: turmaId ? { create: [{ turmaId }] } : undefined,
-          },
-        })
+        const id = generateId()
+        await query(
+          `INSERT INTO "User" (id, cpf, name, role, active, "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, 'STUDENT', true, NOW(), NOW())`,
+          [id, cpf, name]
+        )
+
+        if (turmaId) {
+          await query(
+            `INSERT INTO "UserTurma" (id, "userId", "turmaId", "enrolledAt")
+             VALUES ($1, $2, $3, NOW())`,
+            [generateId(), id, turmaId]
+          )
+        }
         created++
       } catch (err: any) {
         errors.push(`Erro: ${s.name || s.cpf} - ${err.message}`)

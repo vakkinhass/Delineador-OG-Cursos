@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { getCurrentUser } from '@/lib/auth'
 
 // GET /api/exams/[id]/result
@@ -18,57 +18,74 @@ export async function GET(
   const { searchParams } = new URL(request.url)
   const targetUserId = user.role === 'ADMIN' ? (searchParams.get('userId') || user.id) : user.id
 
-  const result = await db.examResult.findUnique({
-    where: { examId_userId: { examId: id, userId: targetUserId } },
-    include: {
-      exam: {
-        include: {
-          questions: {
-            orderBy: { order: 'asc' },
-            include: { question: { include: { subject: { select: { name: true } } } } },
-          },
-        },
-      },
-      user: { select: { id: true, name: true, cpf: true } },
-    },
-  })
+  // Buscar resultado
+  const resultRes = await query(
+    `SELECT r.id, r."examId" AS examid, r.answers, r.score,
+            r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
+            r."timeSpentSeconds" AS timespentseconds, r.status,
+            r."startedAt" AS startedat, r."submittedAt" AS submittedat,
+            e.title AS "examTitle",
+            u.name AS "userName", u.cpf AS "userCpf"
+       FROM "ExamResult" r
+       JOIN "Exam" e ON e.id = r."examId"
+       JOIN "User" u ON u.id = r."userId"
+      WHERE r."examId" = $1 AND r."userId" = $2`,
+    [id, targetUserId]
+  )
 
+  const result = resultRes.rows[0]
   if (!result) {
     return NextResponse.json({ error: 'Resultado não encontrado.' }, { status: 404 })
   }
 
-  const answers = result.answers ? JSON.parse(result.answers) : {}
+  // Buscar questões da prova com gabarito
+  const questionsRes = await query(
+    `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+            q."correctAnswer" AS correctanswer, q.explanation,
+            s.name AS "subjectName", eq."order" AS order_num
+       FROM "ExamQuestion" eq
+       JOIN "Question" q ON q.id = eq."questionId"
+       LEFT JOIN "Subject" s ON s.id = q."subjectId"
+      WHERE eq."examId" = $1
+      ORDER BY eq."order" ASC`,
+    [id]
+  )
+
+  let answers = {}
+  if (result.answers) {
+    try { answers = JSON.parse(result.answers) } catch { answers = {} }
+  }
 
   return NextResponse.json({
     result: {
       id: result.id,
-      examId: result.examId,
-      examTitle: result.exam.title,
-      userName: result.user.name,
-      userCpf: result.user.cpf,
+      examId: result.examid,
+      examTitle: result.examtitle,
+      userName: result.username,
+      userCpf: result.usercpf,
       score: result.score,
-      correctCount: result.correctCount,
-      totalQuestions: result.totalQuestions,
-      timeSpentSeconds: result.timeSpentSeconds,
+      correctCount: result.correctcount,
+      totalQuestions: result.totalquestions,
+      timeSpentSeconds: result.timespentseconds,
       status: result.status,
-      startedAt: result.startedAt?.toISOString() || null,
-      submittedAt: result.submittedAt?.toISOString() || null,
+      startedAt: result.startedat ? new Date(result.startedat).toISOString() : null,
+      submittedAt: result.submittedat ? new Date(result.submittedat).toISOString() : null,
     },
-    questions: result.exam.questions.map((eq, index) => {
-      const userAnswer = answers[eq.questionId] || null
+    questions: questionsRes.rows.map((q, index) => {
+      const userAnswer = answers[q.id] || null
       return {
-        id: eq.question.id,
+        id: q.id,
         index: index + 1,
-        subjectName: eq.question.subject.name,
-        statement: eq.question.statement,
-        optionA: eq.question.optionA,
-        optionB: eq.question.optionB,
-        optionC: eq.question.optionC,
-        optionD: eq.question.optionD,
-        correctAnswer: eq.question.correctAnswer,
+        subjectName: q.subjectname,
+        statement: q.statement,
+        optionA: q.optiona,
+        optionB: q.optionb,
+        optionC: q.optionc,
+        optionD: q.optiond,
+        correctAnswer: q.correctanswer,
         userAnswer,
-        isCorrect: userAnswer === eq.question.correctAnswer,
-        explanation: eq.question.explanation,
+        isCorrect: userAnswer === q.correctanswer,
+        explanation: q.explanation,
       }
     }),
   })

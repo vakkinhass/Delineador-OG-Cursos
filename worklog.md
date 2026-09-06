@@ -177,3 +177,67 @@ Stage Summary:
 - Correção aplicada em todos os 3 lugares (turma-report API, turma-pdf API, frontend legend)
 - Regra agora: quem passa na recuperação, passa de fato (a nota da recuperação substitui a original)
 - Todas as APIs retornando 200, sem erros no dev log
+
+---
+Task ID: API-REWRITE
+Agent: Sub-agent (general-purpose)
+Task: Rewrite all remaining API route files to use `pg` (via @/lib/db-pg) instead of Prisma (@/lib/db) for Netlify serverless compatibility
+
+Work Log:
+- Read previous worklog (Tasks 1-12) and existing files: db-pg.ts, auth.ts, prisma/schema.prisma, all 22 API route files
+- Replaced ALL Prisma `db.*` calls with direct SQL queries via `query()` from @/lib/db-pg
+- Used `generateId()` from @/lib/db-pg for new IDs (User, Turma, Exam, ExamQuestion, ExamAssignment, ExamResult)
+- Used parameterized queries ($1, $2, ...) for SQL injection prevention
+- All PostgreSQL identifiers double-quoted (e.g., "User", "ExamResult", "turmaId", "createdAt")
+- Access pg result rows using lowercase keys (e.g., res.rows[0].turmaid, res.rows[0].subjectname)
+- Used ANY($1::text[]) for IN clauses with array params
+- Used GROUP BY subqueries to replace Prisma's _count aggregation
+- Used JOINs (LEFT JOIN "Turma"/"Subject") to replace Prisma relation includes
+- Used sequential queries + in-memory joins to replace Prisma nested includes
+- For the upsert pattern (ExamResult by examId+userId, ExamAssignment by examId+userId), implemented SELECT-then-INSERT-or-UPDATE manually since pg has no native upsert helper
+
+Files rewritten (22 total):
+1. /api/subjects/route.ts - GET subjects with question count via subquery
+2. /api/users/route.ts - GET users (with turmas via JOIN), POST create user (with UserTurma inserts)
+3. /api/users/[id]/route.ts - PUT update user (DELETE+INSERT UserTurma), DELETE user
+4. /api/users/bulk-import/route.ts - POST bulk import students
+5. /api/turmas/route.ts - GET turmas (with studentCount + examCount via GROUP BY), POST create turma
+6. /api/turmas/[id]/route.ts - PUT update, DELETE turma
+7. /api/exams/route.ts - GET exams (admin all / student turma+assignments), POST create exam with ExamQuestion inserts
+8. /api/exams/[id]/route.ts - GET exam details (admin with answers, student without), DELETE exam
+9. /api/exams/[id]/start/route.ts - POST start exam (time window check, create/update ExamResult)
+10. /api/exams/[id]/save/route.ts - POST auto-save answers
+11. /api/exams/[id]/submit/route.ts - POST submit (grade, recovery auto-release: creates recovery Exam + ExamQuestion copy + ExamAssignment if score < 60%)
+12. /api/exams/[id]/result/route.ts - GET result with answer key (JOIN Question+Subject)
+13. /api/exams/[id]/assign/route.ts - POST assign exam (upsert ExamAssignment), DELETE remove assignment
+14. /api/mock-exam/generate/route.ts - POST generate mock exam (random questions, no answers)
+15. /api/mock-exam/grade/route.ts - POST grade mock exam (with answer key)
+16. /api/questions/mock/route.ts - GET questions with answers (admin view)
+17. /api/reports/grades/route.ts - GET grades report (admin) with question counts + results by exam
+18. /api/reports/turma-report/route.ts - GET consolidated turma report with recovery data (3-step query: exams → results → recovery results)
+19. /api/reports/turma-pdf/route.ts - GET turma report PDF (kept generateTurmaReportPdf import, replaced Prisma with pg queries)
+20. /api/reports/exam-pdf/route.ts - GET exam PDF (kept generateExamPdf import, replaced Prisma with pg queries)
+21. /api/backup/export/route.ts - GET export all data as JSON (users + turmas + UserTurma join)
+22. /api/backup/restore/route.ts - POST restore from JSON (turmas first, then users with UserTurma)
+
+Key logic preserved:
+- Same API contract (same request/response JSON format) - frontend requires no changes
+- Same HTTP status codes (200, 400, 401, 403, 404, 409, 500)
+- Same auth checks (getCurrentUser, requireAuth, requireAdmin)
+- Same error handling (try/catch with same messages)
+- Same recovery logic: score < 60% → create recovery exam copy + assignment, 7-day window
+- Same final grade calculation: if recovery taken, final = recovery score (else original score)
+- Same PDF generation (kept @/lib/pdf-generator imports for both exam-pdf and turma-pdf)
+- Same mock exam flow (generate without answers, grade with answers + bySubject stats)
+
+Verification:
+- `bun run lint` (ESLint) passes cleanly with no errors
+- `npx tsc --noEmit` shows zero errors in /src/app/api/* (fixed pre-existing Buffer→BodyInit cast issue in PDF routes by using `as unknown as BodyInit`)
+- grep confirms: no remaining imports of @/lib/db or @prisma/client in any API route (only db.ts legacy file retains Prisma import)
+- All 23 API route files (22 mine + auth/login which was already migrated) now import exclusively from @/lib/db-pg
+
+Stage Summary:
+- All 22 remaining API route files successfully migrated from Prisma to pg
+- API contracts unchanged - no frontend changes needed
+- SQL injection prevention via parameterized queries throughout
+- Application is now ready for Netlify serverless deployment (no Prisma engine binary dependency in API layer)

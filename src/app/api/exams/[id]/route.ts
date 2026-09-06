@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { getCurrentUser, requireAdmin } from '@/lib/auth'
 
 // GET /api/exams/[id] - Detalhes da prova
@@ -16,48 +16,92 @@ export async function GET(
   const { id } = await params
   const now = new Date()
 
-  const exam = await db.exam.findUnique({
-    where: { id },
-    include: {
-      turma: { select: { name: true } },
-      subject: { select: { name: true } },
-      questions: {
-        orderBy: { order: 'asc' },
-        include: { question: { include: { subject: { select: { name: true } } } } },
-      },
-      assignments: {
-        include: { user: { select: { id: true, name: true, cpf: true } } },
-      },
-      results: {
-        where: user.role === 'STUDENT' ? { userId: user.id } : undefined,
-        include: { user: { select: { id: true, name: true, cpf: true } } },
-      },
-    },
-  })
+  const examRes = await query(
+    `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
+            e."startDateTime", e."endDateTime", e."durationMinutes",
+            e.active, e."isRecovery",
+            t.name AS "turmaName", s.name AS "subjectName"
+       FROM "Exam" e
+       LEFT JOIN "Turma" t ON t.id = e."turmaId"
+       LEFT JOIN "Subject" s ON s.id = e."subjectId"
+      WHERE e.id = $1`,
+    [id]
+  )
 
-  if (!exam) {
+  if (examRes.rows.length === 0) {
     return NextResponse.json({ error: 'Prova não encontrada.' }, { status: 404 })
   }
+  const exam = examRes.rows[0]
+
+  // Buscar questões da prova (com disciplina)
+  const questionsRes = await query(
+    `SELECT eq."questionId" AS questionid, eq."order" AS order_num,
+            q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
+            q."optionA", q."optionB", q."optionC", q."optionD",
+            q."correctAnswer" AS correctanswer, q.explanation,
+            s.name AS "subjectName"
+       FROM "ExamQuestion" eq
+       JOIN "Question" q ON q.id = eq."questionId"
+       LEFT JOIN "Subject" s ON s.id = q."subjectId"
+      WHERE eq."examId" = $1
+      ORDER BY eq."order" ASC`,
+    [id]
+  )
+
+  // Buscar atribuições
+  const assignmentsRes = await query(
+    `SELECT a.id, a."userId" AS userid, a."startDateTime" AS startdatetime,
+            a."endDateTime" AS enddatetime, a."durationMinutes" AS durationminutes,
+            u.name AS "userName", u.cpf AS "userCpf"
+       FROM "ExamAssignment" a
+       JOIN "User" u ON u.id = a."userId"
+      WHERE a."examId" = $1`,
+    [id]
+  )
+
+  // Buscar resultados (admin vê todos, aluno vê só o seu)
+  const resultsRes = user.role === 'STUDENT'
+    ? await query(
+        `SELECT r.id, r."examId" AS examid, r."userId" AS userid, r.score,
+                r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
+                r."timeSpentSeconds" AS timespentseconds, r.status,
+                r."submittedAt" AS submittedat,
+                u.name AS "userName", u.cpf AS "userCpf"
+           FROM "ExamResult" r
+           JOIN "User" u ON u.id = r."userId"
+          WHERE r."examId" = $1 AND r."userId" = $2`,
+        [id, user.id]
+      )
+    : await query(
+        `SELECT r.id, r."examId" AS examid, r."userId" AS userid, r.score,
+                r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
+                r."timeSpentSeconds" AS timespentseconds, r.status,
+                r."submittedAt" AS submittedat,
+                u.name AS "userName", u.cpf AS "userCpf"
+           FROM "ExamResult" r
+           JOIN "User" u ON u.id = r."userId"
+          WHERE r."examId" = $1`,
+        [id]
+      )
 
   // Verificar acesso do aluno
   if (user.role === 'STUDENT') {
-    // Verificar se o aluno tem acesso: turma OU atribuição individual
-    const userTurmas = await db.userTurma.findMany({
-      where: { userId: user.id },
-      select: { turmaId: true },
-    })
-    const turmaIds = userTurmas.map((t) => t.turmaId)
+    const userTurmasRes = await query(
+      'SELECT "turmaId" AS turmaid FROM "UserTurma" WHERE "userId" = $1',
+      [user.id]
+    )
+    const turmaIds = userTurmasRes.rows.map((t) => t.turmaid)
 
-    const assignment = exam.assignments.find((a) => a.userId === user.id)
-    const isInTurma = exam.turmaId && turmaIds.includes(exam.turmaId)
+    const assignment = assignmentsRes.rows.find((a) => a.userid === user.id)
+    const isInTurma = exam.turmaid && turmaIds.includes(exam.turmaid)
 
     if (!assignment && !isInTurma) {
       return NextResponse.json({ error: 'Você não tem acesso a esta prova.' }, { status: 403 })
     }
 
     // Determinar janela de tempo efetiva
-    const effectiveStart = assignment ? assignment.startDateTime : exam.startDateTime
-    const effectiveEnd = assignment ? assignment.endDateTime : exam.endDateTime
+    const effectiveStart = assignment ? new Date(assignment.startdatetime) : new Date(exam.startdatetime)
+    const effectiveEnd = assignment ? new Date(assignment.enddatetime) : new Date(exam.enddatetime)
 
     // Verificar janela de tempo
     if (now < effectiveStart) {
@@ -83,24 +127,24 @@ export async function GET(
         id: exam.id,
         title: exam.title,
         description: exam.description,
-        subjectName: exam.subject?.name || null,
+        subjectName: exam.subjectname || null,
         startDateTime: effectiveStart.toISOString(),
         endDateTime: effectiveEnd.toISOString(),
-        durationMinutes: assignment?.durationMinutes || exam.durationMinutes,
-        totalQuestions: exam.questions.length,
+        durationMinutes: assignment?.durationminutes || exam.durationminutes,
+        totalQuestions: questionsRes.rows.length,
       },
-      questions: exam.questions.map((eq, index) => ({
-        id: eq.question.id,
+      questions: questionsRes.rows.map((q, index) => ({
+        id: q.id,
         index: index + 1,
-        subjectName: eq.question.subject.name,
-        statement: eq.question.statement,
-        optionA: eq.question.optionA,
-        optionB: eq.question.optionB,
-        optionC: eq.question.optionC,
-        optionD: eq.question.optionD,
+        subjectName: q.subjectname,
+        statement: q.statement,
+        optionA: q.optiona,
+        optionB: q.optionb,
+        optionC: q.optionc,
+        optionD: q.optiond,
         // SEM correctAnswer
       })),
-      existingResult: exam.results[0] || null,
+      existingResult: resultsRes.rows[0] || null,
     })
   }
 
@@ -110,49 +154,49 @@ export async function GET(
       id: exam.id,
       title: exam.title,
       description: exam.description,
-      turmaId: exam.turmaId,
-      turmaName: exam.turma?.name || null,
-      subjectId: exam.subjectId,
-      subjectName: exam.subject?.name || null,
-      startDateTime: exam.startDateTime.toISOString(),
-      endDateTime: exam.endDateTime.toISOString(),
-      durationMinutes: exam.durationMinutes,
+      turmaId: exam.turmaid,
+      turmaName: exam.turmaname || null,
+      subjectId: exam.subjectid,
+      subjectName: exam.subjectname || null,
+      startDateTime: new Date(exam.startdatetime).toISOString(),
+      endDateTime: new Date(exam.enddatetime).toISOString(),
+      durationMinutes: exam.durationminutes,
       active: exam.active,
-      totalQuestions: exam.questions.length,
+      totalQuestions: questionsRes.rows.length,
     },
-    questions: exam.questions.map((eq, index) => ({
-      id: eq.question.id,
+    questions: questionsRes.rows.map((q, index) => ({
+      id: q.id,
       index: index + 1,
-      subjectName: eq.question.subject.name,
-      difficulty: eq.question.difficulty,
-      statement: eq.question.statement,
-      optionA: eq.question.optionA,
-      optionB: eq.question.optionB,
-      optionC: eq.question.optionC,
-      optionD: eq.question.optionD,
-      correctAnswer: eq.question.correctAnswer,
-      explanation: eq.question.explanation,
+      subjectName: q.subjectname,
+      difficulty: q.difficulty,
+      statement: q.statement,
+      optionA: q.optiona,
+      optionB: q.optionb,
+      optionC: q.optionc,
+      optionD: q.optiond,
+      correctAnswer: q.correctanswer,
+      explanation: q.explanation,
     })),
-    assignments: exam.assignments.map((a) => ({
+    assignments: assignmentsRes.rows.map((a) => ({
       id: a.id,
-      userId: a.userId,
-      userName: a.user.name,
-      userCpf: a.user.cpf,
-      startDateTime: a.startDateTime.toISOString(),
-      endDateTime: a.endDateTime.toISOString(),
-      durationMinutes: a.durationMinutes,
+      userId: a.userid,
+      userName: a.username,
+      userCpf: a.usercpf,
+      startDateTime: new Date(a.startdatetime).toISOString(),
+      endDateTime: new Date(a.enddatetime).toISOString(),
+      durationMinutes: a.durationminutes,
     })),
-    results: exam.results.map((r) => ({
+    results: resultsRes.rows.map((r) => ({
       id: r.id,
-      userId: r.userId,
-      userName: r.user.name,
-      userCpf: r.user.cpf,
+      userId: r.userid,
+      userName: r.username,
+      userCpf: r.usercpf,
       score: r.score,
-      correctCount: r.correctCount,
-      totalQuestions: r.totalQuestions,
-      timeSpentSeconds: r.timeSpentSeconds,
+      correctCount: r.correctcount,
+      totalQuestions: r.totalquestions,
+      timeSpentSeconds: r.timespentseconds,
       status: r.status,
-      submittedAt: r.submittedAt?.toISOString() || null,
+      submittedAt: r.submittedat ? new Date(r.submittedat).toISOString() : null,
     })),
   })
 }
@@ -171,7 +215,7 @@ export async function DELETE(
   const { id } = await params
 
   try {
-    await db.exam.delete({ where: { id } })
+    await query('DELETE FROM "Exam" WHERE id = $1', [id])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Delete exam error:', error)

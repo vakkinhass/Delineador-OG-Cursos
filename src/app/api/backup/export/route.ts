@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db-pg'
 import { requireAdmin } from '@/lib/auth'
 
 // GET /api/backup/export
@@ -11,25 +11,44 @@ export async function GET() {
     return NextResponse.json({ error: 'Acesso restrito ao administrador.' }, { status: 403 })
   }
 
-  const users = await db.user.findMany({
-    orderBy: { name: 'asc' },
-    include: {
-      turmas: { include: { turma: { select: { id: true, name: true } } } },
-    },
-  })
+  const usersRes = await query(
+    `SELECT u.id, u.cpf, u.name, u.role, u.active
+       FROM "User" u
+      ORDER BY u.name ASC`
+  )
 
-  const turmas = await db.turma.findMany({ orderBy: { name: 'asc' } })
+  const turmasRes = await query(
+    `SELECT id, name, description, active FROM "Turma" ORDER BY name ASC`
+  )
+
+  // Buscar turmas de cada usuário
+  const userTurmasRes = await query(
+    `SELECT ut."userId" AS userid, t.name
+       FROM "UserTurma" ut
+       JOIN "Turma" t ON t.id = ut."turmaId"
+      ORDER BY t.name ASC`
+  )
+  const turmasByUser: Record<string, string[]> = {}
+  for (const row of userTurmasRes.rows) {
+    if (!turmasByUser[row.userid]) turmasByUser[row.userid] = []
+    turmasByUser[row.userid].push(row.name)
+  }
 
   const backup = {
     exportedAt: new Date().toISOString(),
     version: 1,
-    turmas: turmas.map((t) => ({ id: t.id, name: t.name, description: t.description, active: t.active })),
-    users: users.map((u) => ({
+    turmas: turmasRes.rows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      active: t.active,
+    })),
+    users: usersRes.rows.map((u) => ({
       cpf: u.cpf,
       name: u.name,
       role: u.role,
       active: u.active,
-      turmas: u.turmas.map((ut) => ut.turma.name),
+      turmas: turmasByUser[u.id] || [],
     })),
   }
 
