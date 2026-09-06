@@ -16,9 +16,11 @@ export async function GET(request: NextRequest) {
   if (user.role === 'ADMIN') {
     // Admin vê todas (ou filtra por turma)
     const examsRes = await query(
-      `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
-              e."startDateTime", e."endDateTime", e."durationMinutes",
-              e.active, e."isRecovery",
+      `SELECT e.id, e.title, e.description,
+              e."turmaId" AS turmaid, e."subjectId" AS subjectid,
+              e."startDateTime" AS startdatetime, e."endDateTime" AS enddatetime,
+              e."durationMinutes" AS durationminutes,
+              e.active, e."isRecovery" AS isrecovery,
               t.name AS turmaname, s.name AS subjectname
          FROM "Exam" e
          LEFT JOIN "Turma" t ON t.id = e."turmaId"
@@ -82,9 +84,11 @@ export async function GET(request: NextRequest) {
   let turmaExamsRows: any[] = []
   if (turmaIds.length > 0) {
     const turmaExamsRes = await query(
-      `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
-              e."startDateTime", e."endDateTime", e."durationMinutes",
-              e.active, e."isRecovery",
+      `SELECT e.id, e.title, e.description,
+              e."turmaId" AS turmaid, e."subjectId" AS subjectid,
+              e."startDateTime" AS startdatetime, e."endDateTime" AS enddatetime,
+              e."durationMinutes" AS durationminutes,
+              e.active, e."isRecovery" AS isrecovery,
               t.name AS turmaname, s.name AS subjectname
          FROM "Exam" e
          LEFT JOIN "Turma" t ON t.id = e."turmaId"

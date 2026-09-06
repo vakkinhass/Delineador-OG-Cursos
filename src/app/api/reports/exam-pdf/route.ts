@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
   }
 
   const questionsRes = await query(
-    `SELECT q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+    `SELECT q.statement, q."optionA" AS optiona, q."optionB" AS optionb, q."optionC" AS optionc, q."optionD" AS optiond,
             q."correctAnswer" AS correctanswer, q.explanation,
             s.name AS subjectname, eq."order" AS order_num
        FROM "ExamQuestion" eq

@@ -17,9 +17,9 @@ export async function GET(
   const now = new Date()
 
   const examRes = await query(
-    `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
-            e."startDateTime", e."endDateTime", e."durationMinutes",
-            e.active, e."isRecovery",
+    `SELECT e.id, e.title, e.description, e."turmaId" AS turmaid, e."subjectId" AS subjectid,
+            e."startDateTime" AS startdatetime, e."endDateTime" AS enddatetime, e."durationMinutes" AS durationminutes,
+            e.active, e."isRecovery" AS isrecovery,
             t.name AS turmaname, s.name AS subjectname
        FROM "Exam" e
        LEFT JOIN "Turma" t ON t.id = e."turmaId"
@@ -37,7 +37,7 @@ export async function GET(
   const questionsRes = await query(
     `SELECT eq."questionId" AS questionid, eq."order" AS order_num,
             q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
-            q."optionA", q."optionB", q."optionC", q."optionD",
+            q."optionA" AS optiona, q."optionB" AS optionb, q."optionC" AS optionc, q."optionD" AS optiond,
             q."correctAnswer" AS correctanswer, q.explanation,
             s.name AS subjectname
        FROM "ExamQuestion" eq

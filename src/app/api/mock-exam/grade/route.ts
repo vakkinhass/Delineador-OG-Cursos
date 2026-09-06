@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     // Buscar questões com gabarito
     const questionsRes = await query(
-      `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+      `SELECT q.id, q.statement, q."optionA" AS optiona, q."optionB" AS optionb, q."optionC" AS optionc, q."optionD" AS optiond,
               q."correctAnswer" AS correctanswer, q.explanation,
               s.name AS subjectname
          FROM "Question" q

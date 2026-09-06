@@ -40,7 +40,7 @@ export async function GET(
 
   // Buscar questões da prova com gabarito
   const questionsRes = await query(
-    `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
+    `SELECT q.id, q.statement, q."optionA" AS optiona, q."optionB" AS optionb, q."optionC" AS optionc, q."optionD" AS optiond,
             q."correctAnswer" AS correctanswer, q.explanation,
             s.name AS subjectname, eq."order" AS order_num
        FROM "ExamQuestion" eq
