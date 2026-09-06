@@ -41,26 +41,39 @@ import type { ExamDTO, TurmaDTO, SubjectDTO, UserDTO, ExamAssignmentDTO } from '
 
 // Helper para formatar datetime-local
 function toLocalInput(date: Date): string {
+  if (!date || isNaN(date.getTime())) return ''
   const offset = date.getTimezoneOffset()
   const local = new Date(date.getTime() - offset * 60 * 1000)
   return local.toISOString().slice(0, 16)
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+function formatDate(iso: string): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    return d.toLocaleString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
 }
 
 function getExamStatus(exam: ExamDTO): { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' } {
-  const now = new Date()
-  const start = new Date(exam.startDateTime)
-  const end = new Date(exam.endDateTime)
-  if (!exam.active) return { label: 'Inativa', variant: 'destructive' }
-  if (now < start) return { label: 'Agendada', variant: 'secondary' }
-  if (now > end) return { label: 'Encerrada', variant: 'outline' }
-  return { label: 'Disponível', variant: 'default' }
+  try {
+    const now = new Date()
+    const start = new Date(exam.startDateTime)
+    const end = new Date(exam.endDateTime)
+    if (!exam.active) return { label: 'Inativa', variant: 'destructive' }
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return { label: '—', variant: 'outline' }
+    if (now < start) return { label: 'Agendada', variant: 'secondary' }
+    if (now > end) return { label: 'Encerrada', variant: 'outline' }
+    return { label: 'Disponível', variant: 'default' }
+  } catch {
+    return { label: '—', variant: 'outline' }
+  }
 }
 
 export function ExamsManager() {
@@ -146,14 +159,20 @@ export function ExamsManager() {
       toast({ title: 'Atenção', description: 'Preencha título e datas.', variant: 'destructive' })
       return
     }
+    const startDate = new Date(form.startDateTime)
+    const endDate = new Date(form.endDateTime)
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      toast({ title: 'Atenção', description: 'Datas inválidas.', variant: 'destructive' })
+      return
+    }
     setSaving(true)
     try {
       await apiFetch('/api/exams', {
         method: 'POST',
         body: JSON.stringify({
           ...form,
-          startDateTime: new Date(form.startDateTime).toISOString(),
-          endDateTime: new Date(form.endDateTime).toISOString(),
+          startDateTime: startDate.toISOString(),
+          endDateTime: endDate.toISOString(),
         }),
       })
       toast({ title: 'Sucesso', description: 'Prova criada com sucesso.' })
@@ -200,14 +219,20 @@ export function ExamsManager() {
       toast({ title: 'Atenção', description: 'Selecione o aluno e defina as datas.', variant: 'destructive' })
       return
     }
+    const startDate = new Date(assignForm.startDateTime)
+    const endDate = new Date(assignForm.endDateTime)
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      toast({ title: 'Atenção', description: 'Datas inválidas.', variant: 'destructive' })
+      return
+    }
     setSaving(true)
     try {
       await apiFetch(`/api/exams/${assignExam.id}/assign`, {
         method: 'POST',
         body: JSON.stringify({
           userId: assignForm.userId,
-          startDateTime: new Date(assignForm.startDateTime).toISOString(),
-          endDateTime: new Date(assignForm.endDateTime).toISOString(),
+          startDateTime: startDate.toISOString(),
+          endDateTime: endDate.toISOString(),
           durationMinutes: assignForm.durationMinutes,
         }),
       })
