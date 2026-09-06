@@ -1,11 +1,11 @@
 [build]
-  command = "bun run build"
+  command = "npm install && npx prisma generate && npm run build:netlify"
   publish = ".next"
 
 [build.environment]
   NEXT_VERSION = "16.1.1"
   NODE_VERSION = "20"
-  # Variaveis de ambiente do Supabase (lidas em runtime)
+  # Variaveis de ambiente do Supabase (redundancia - tambem estao hardcoded no schema)
   DATABASE_URL = "postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
   DIRECT_URL = "postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
   SUPABASE_URL = "https://xwlaedcdeyxpxywbdbus.supabase.co"
