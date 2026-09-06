@@ -18,7 +18,9 @@ export async function POST(
   const now = new Date()
 
   const examRes = await query(
-    `SELECT id, "turmaId", "startDateTime", "endDateTime", "durationMinutes"
+    `SELECT id, "turmaId" AS turmaid,
+            "startDateTime" AS startdatetime, "endDateTime" AS enddatetime,
+            "durationMinutes" AS durationminutes
        FROM "Exam" WHERE id = $1`,
     [id]
   )
