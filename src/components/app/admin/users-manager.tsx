@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api/client'
-import { UserPlus, Pencil, Trash2, Search, Loader2, Shield, GraduationCap } from 'lucide-react'
+import { UserPlus, Pencil, Trash2, Search, Loader2, Shield, GraduationCap, Upload, Download, FileText } from 'lucide-react'
 import type { UserDTO, TurmaDTO } from '@/lib/types'
 
 function maskCpf(value: string): string {
@@ -53,6 +53,12 @@ export function UsersManager() {
     active: true,
     turmaIds: [] as string[],
   })
+
+  // Bulk import
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkTurmaId, setBulkTurmaId] = useState('')
+  const [bulkLoading, setBulkLoading] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -127,6 +133,60 @@ export function UsersManager() {
     }
   }
 
+  // Parser de texto: aceita formatos "Nome - CPF", "Nome,CPF", "CPF Nome", um por linha
+  const parseBulkText = (text: string): { name: string; cpf: string }[] => {
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+    const students: { name: string; cpf: string }[] = []
+    for (const line of lines) {
+      // Tenta padrões: "Nome - 000.000.000-00", "Nome,000.000.000-00", "Nome;000.000.000-00"
+      // ou "000.000.000-00 Nome" ou "Nome 000.000.000-00"
+      const cpfMatch = line.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/)
+      if (!cpfMatch) continue
+      const cpf = cpfMatch[0]
+      let name = line.replace(cpf, '').replace(/^[-,;\s]+|[-,;\s]+$/g, '').trim()
+      // Se o CPF vinha antes, o nome é o resto
+      if (!name) continue
+      students.push({ name, cpf })
+    }
+    return students
+  }
+
+  const handleBulkImport = async () => {
+    const students = parseBulkText(bulkText)
+    if (students.length === 0) {
+      toast({
+        title: 'Atenção',
+        description: 'Nenhum aluno válido encontrado. Use o formato: Nome - 000.000.000-00 (um por linha).',
+        variant: 'destructive',
+      })
+      return
+    }
+    setBulkLoading(true)
+    try {
+      const data = await apiFetch<{ created: number; skipped: number; errors?: string[] }>(
+        '/api/users/bulk-import',
+        {
+          method: 'POST',
+          body: JSON.stringify({ students, turmaId: bulkTurmaId || undefined }),
+        }
+      )
+      toast({
+        title: 'Importação concluída!',
+        description: `${data.created} aluno(s) cadastrado(s), ${data.skipped} já existente(s).${data.errors ? ` ${data.errors.length} erro(s).` : ''}`,
+      })
+      if (data.errors && data.errors.length > 0) {
+        console.log('Import errors:', data.errors)
+      }
+      setBulkOpen(false)
+      setBulkText('')
+      loadData()
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' })
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
   const filtered = users.filter(
     (u) =>
       u.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -142,10 +202,22 @@ export function UsersManager() {
             Cadastre e gerencie alunos e administradores
           </p>
         </div>
-        <Button onClick={openCreate} className="self-start">
-          <UserPlus className="w-4 h-4 mr-1.5" />
-          Novo Usuário
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={() => setBulkOpen(true)} variant="outline">
+            <Upload className="w-4 h-4 mr-1.5" />
+            Importar Lista
+          </Button>
+          <a href="/api/backup/export" target="_blank" rel="noreferrer">
+            <Button variant="outline">
+              <Download className="w-4 h-4 mr-1.5" />
+              Backup
+            </Button>
+          </a>
+          <Button onClick={openCreate}>
+            <UserPlus className="w-4 h-4 mr-1.5" />
+            Novo Usuário
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
@@ -310,6 +382,55 @@ export function UsersManager() {
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
               {editingUser ? 'Salvar' : 'Cadastrar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Importação em Massa */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Importar Lista de Alunos</DialogTitle>
+            <DialogDescription>
+              Cole a lista de alunos abaixo (um por linha). Formato: Nome - CPF
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Turma (opcional)</Label>
+              <Select value={bulkTurmaId} onValueChange={setBulkTurmaId}>
+                <SelectTrigger><SelectValue placeholder="Vincular a uma turma" /></SelectTrigger>
+                <SelectContent>
+                  {turmas.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Lista de Alunos</Label>
+              <textarea
+                className="w-full min-h-[200px] p-3 text-sm rounded-md border border-input bg-background font-mono"
+                placeholder={`Exemplo:\nJoão Silva - 123.456.789-00\nMaria Santos - 987.654.321-00\nPedro Oliveira - 111.222.333-44`}
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Formatos aceitos: "Nome - CPF", "Nome, CPF", "Nome CPF" (um por linha)
+              </p>
+            </div>
+            {bulkText.trim() && (
+              <div className="rounded-lg bg-secondary/10 p-3 text-sm">
+                <strong>{parseBulkText(bulkText).length}</strong> aluno(s) detectado(s)
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancelar</Button>
+            <Button onClick={handleBulkImport} disabled={bulkLoading || !bulkText.trim()}>
+              {bulkLoading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
+              Importar {parseBulkText(bulkText).length > 0 && `(${parseBulkText(bulkText).length})`}
             </Button>
           </DialogFooter>
         </DialogContent>
