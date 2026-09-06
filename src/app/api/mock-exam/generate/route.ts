@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
     // Buscar questões (buscamos mais do que o necessário para embaralhar)
     const allQuestionsRes = await query(
       `SELECT q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
-              q."optionA", q."optionB", q."optionC", q."optionD",
+              q."optionA" AS optiona, q."optionB" AS optionb,
+              q."optionC" AS optionc, q."optionD" AS optiond,
               s.name AS subjectname
          FROM "Question" q
          LEFT JOIN "Subject" s ON s.id = q."subjectId"

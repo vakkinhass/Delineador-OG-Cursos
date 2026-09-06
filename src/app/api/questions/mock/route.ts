@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
 
   const questionsRes = await query(
     `SELECT q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
-            q."optionA", q."optionB", q."optionC", q."optionD",
+            q."optionA" AS optiona, q."optionB" AS optionb,
+            q."optionC" AS optionc, q."optionD" AS optiond,
             q."correctAnswer" AS correctanswer, q.explanation,
             s.name AS subjectname
        FROM "Question" q
