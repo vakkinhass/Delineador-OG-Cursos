@@ -1,0 +1,16 @@
+[build]
+  command = "bun run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_VERSION = "16.1.1"
+  NODE_VERSION = "20"
+  # Variaveis de ambiente do Supabase (lidas em runtime)
+  DATABASE_URL = "postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
+  DIRECT_URL = "postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
+  SUPABASE_URL = "https://xwlaedcdeyxpxywbdbus.supabase.co"
+  SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3bGFlZGNkZXl4cHh5d2JkYnVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2OTk0OTgsImV4cCI6MjEwNDI3NTQ5OH0.C88AfZSfdypvkm9_9UHbxNRfHI_acJHpXZ9D1kOcU2A"
+  SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3bGFlZGNkZXl4cHh5d2JkYnVzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODY5OTQ5OCwiZXhwIjoyMTA0Mjc1NDk4fQ.jRJn9Kfd5GNo8FgmnNlzunghjb9C6Y6_W-DAaZW0jTg"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
