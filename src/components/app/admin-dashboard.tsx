@@ -90,7 +90,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       <div className="flex flex-1">
         {/* Sidebar */}
         <AnimatePresence>
-          {(sidebarOpen || typeof window === 'undefined') && (
+          {sidebarOpen && (
             <motion.div
               initial={{ x: -300 }}
               animate={{ x: 0 }}
