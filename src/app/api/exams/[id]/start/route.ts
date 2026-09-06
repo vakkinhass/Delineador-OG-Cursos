@@ -74,7 +74,7 @@ export async function POST(
   // Buscar questões da prova
   const questionsRes = await query(
     `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
-            s.name AS "subjectName"
+            s.name AS subjectname
        FROM "ExamQuestion" eq
        JOIN "Question" q ON q.id = eq."questionId"
        LEFT JOIN "Subject" s ON s.id = q."subjectId"

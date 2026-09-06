@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
   const examsRes = await query(
     `SELECT e.id, e.title,
-            t.name AS "turmaName", s.name AS "subjectName"
+            t.name AS turmaname, s.name AS subjectname
        FROM "Exam" e
        LEFT JOIN "Turma" t ON t.id = e."turmaId"
        LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     const resultsRes = await query(
       `SELECT r."examId" AS examid, r."userId" AS userid, r.score,
               r."timeSpentSeconds" AS timespentseconds, r."submittedAt" AS submittedat,
-              u.name AS "userName", u.cpf AS "userCpf"
+              u.name AS username, u.cpf AS usercpf
          FROM "ExamResult" r
          JOIN "User" u ON u.id = r."userId"
         WHERE r."examId" = ANY($1::text[])

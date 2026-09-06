@@ -11,7 +11,7 @@ export async function GET() {
 
   const res = await query(
     `SELECT s.id, s.name, s.description,
-            (SELECT COUNT(*)::int FROM "Question" q WHERE q."subjectId" = s.id) AS "questionCount"
+            (SELECT COUNT(*)::int FROM "Question" q WHERE q."subjectId" = s.id) AS questioncount
        FROM "Subject" s
       ORDER BY s.name ASC`
   )
@@ -21,7 +21,7 @@ export async function GET() {
       id: s.id,
       name: s.name,
       description: s.description,
-      questionCount: s.questionCount,
+      questionCount: s.questioncount,
     })),
   })
 }

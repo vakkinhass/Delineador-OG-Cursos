@@ -24,8 +24,8 @@ export async function GET(
             r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
             r."timeSpentSeconds" AS timespentseconds, r.status,
             r."startedAt" AS startedat, r."submittedAt" AS submittedat,
-            e.title AS "examTitle",
-            u.name AS "userName", u.cpf AS "userCpf"
+            e.title AS examtitle,
+            u.name AS username, u.cpf AS usercpf
        FROM "ExamResult" r
        JOIN "Exam" e ON e.id = r."examId"
        JOIN "User" u ON u.id = r."userId"
@@ -42,7 +42,7 @@ export async function GET(
   const questionsRes = await query(
     `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
             q."correctAnswer" AS correctanswer, q.explanation,
-            s.name AS "subjectName", eq."order" AS order_num
+            s.name AS subjectname, eq."order" AS order_num
        FROM "ExamQuestion" eq
        JOIN "Question" q ON q.id = eq."questionId"
        LEFT JOIN "Subject" s ON s.id = q."subjectId"

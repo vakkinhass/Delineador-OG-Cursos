@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
       `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
               e."startDateTime", e."endDateTime", e."durationMinutes",
               e.active, e."isRecovery",
-              t.name AS "turmaName", s.name AS "subjectName"
+              t.name AS turmaname, s.name AS subjectname
          FROM "Exam" e
          LEFT JOIN "Turma" t ON t.id = e."turmaId"
          LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
       `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
               e."startDateTime", e."endDateTime", e."durationMinutes",
               e.active, e."isRecovery",
-              t.name AS "turmaName", s.name AS "subjectName"
+              t.name AS turmaname, s.name AS subjectname
          FROM "Exam" e
          LEFT JOIN "Turma" t ON t.id = e."turmaId"
          LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
             a."endDateTime" AS enddatetime, a."durationMinutes" AS durationminutes,
             e.title, e.description, e."subjectId" AS subjectid,
             e.active, e."isRecovery" AS isrecovery,
-            s.name AS "subjectName"
+            s.name AS subjectname
        FROM "ExamAssignment" a
        JOIN "Exam" e ON e.id = a."examId"
        LEFT JOIN "Subject" s ON s.id = e."subjectId"

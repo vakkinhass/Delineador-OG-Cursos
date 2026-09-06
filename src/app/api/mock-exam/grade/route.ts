@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     const questionsRes = await query(
       `SELECT q.id, q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
               q."correctAnswer" AS correctanswer, q.explanation,
-              s.name AS "subjectName"
+              s.name AS subjectname
          FROM "Question" q
          LEFT JOIN "Subject" s ON s.id = q."subjectId"
         WHERE q.id = ANY($1::text[])`,

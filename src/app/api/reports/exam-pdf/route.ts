@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const examRes = await query(
     `SELECT e.id, e.title, e."durationMinutes" AS durationminutes,
             e."startDateTime" AS startdatetime, e."endDateTime" AS enddatetime,
-            t.name AS "turmaName", s.name AS "subjectName"
+            t.name AS turmaname, s.name AS subjectname
        FROM "Exam" e
        LEFT JOIN "Turma" t ON t.id = e."turmaId"
        LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   const questionsRes = await query(
     `SELECT q.statement, q."optionA", q."optionB", q."optionC", q."optionD",
             q."correctAnswer" AS correctanswer, q.explanation,
-            s.name AS "subjectName", eq."order" AS order_num
+            s.name AS subjectname, eq."order" AS order_num
        FROM "ExamQuestion" eq
        JOIN "Question" q ON q.id = eq."questionId"
        LEFT JOIN "Subject" s ON s.id = q."subjectId"

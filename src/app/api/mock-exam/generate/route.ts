@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const allQuestionsRes = await query(
       `SELECT q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
               q."optionA", q."optionB", q."optionC", q."optionD",
-              s.name AS "subjectName"
+              s.name AS subjectname
          FROM "Question" q
          LEFT JOIN "Subject" s ON s.id = q."subjectId"
          ${where}

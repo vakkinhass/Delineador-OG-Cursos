@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   // Buscar provas
   const examsRes = await query(
     `SELECT e.id, e.title, e."startDateTime" AS startdatetime,
-            t.name AS "turmaName", s.name AS "subjectName"
+            t.name AS turmaname, s.name AS subjectname
        FROM "Exam" e
        LEFT JOIN "Turma" t ON t.id = e."turmaId"
        LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
               r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
               r."timeSpentSeconds" AS timespentseconds, r.status,
               r."submittedAt" AS submittedat,
-              u.name AS "userName", u.cpf AS "userCpf"
+              u.name AS username, u.cpf AS usercpf
          FROM "ExamResult" r
          JOIN "User" u ON u.id = r."userId"
         WHERE r."examId" = ANY($1::text[])

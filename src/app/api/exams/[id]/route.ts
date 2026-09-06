@@ -20,7 +20,7 @@ export async function GET(
     `SELECT e.id, e.title, e.description, e."turmaId", e."subjectId",
             e."startDateTime", e."endDateTime", e."durationMinutes",
             e.active, e."isRecovery",
-            t.name AS "turmaName", s.name AS "subjectName"
+            t.name AS turmaname, s.name AS subjectname
        FROM "Exam" e
        LEFT JOIN "Turma" t ON t.id = e."turmaId"
        LEFT JOIN "Subject" s ON s.id = e."subjectId"
@@ -39,7 +39,7 @@ export async function GET(
             q.id, q."subjectId" AS subjectid, q.difficulty, q.statement,
             q."optionA", q."optionB", q."optionC", q."optionD",
             q."correctAnswer" AS correctanswer, q.explanation,
-            s.name AS "subjectName"
+            s.name AS subjectname
        FROM "ExamQuestion" eq
        JOIN "Question" q ON q.id = eq."questionId"
        LEFT JOIN "Subject" s ON s.id = q."subjectId"
@@ -52,7 +52,7 @@ export async function GET(
   const assignmentsRes = await query(
     `SELECT a.id, a."userId" AS userid, a."startDateTime" AS startdatetime,
             a."endDateTime" AS enddatetime, a."durationMinutes" AS durationminutes,
-            u.name AS "userName", u.cpf AS "userCpf"
+            u.name AS username, u.cpf AS usercpf
        FROM "ExamAssignment" a
        JOIN "User" u ON u.id = a."userId"
       WHERE a."examId" = $1`,
@@ -66,7 +66,7 @@ export async function GET(
                 r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
                 r."timeSpentSeconds" AS timespentseconds, r.status,
                 r."submittedAt" AS submittedat,
-                u.name AS "userName", u.cpf AS "userCpf"
+                u.name AS username, u.cpf AS usercpf
            FROM "ExamResult" r
            JOIN "User" u ON u.id = r."userId"
           WHERE r."examId" = $1 AND r."userId" = $2`,
@@ -77,7 +77,7 @@ export async function GET(
                 r."correctCount" AS correctcount, r."totalQuestions" AS totalquestions,
                 r."timeSpentSeconds" AS timespentseconds, r.status,
                 r."submittedAt" AS submittedat,
-                u.name AS "userName", u.cpf AS "userCpf"
+                u.name AS username, u.cpf AS usercpf
            FROM "ExamResult" r
            JOIN "User" u ON u.id = r."userId"
           WHERE r."examId" = $1`,
