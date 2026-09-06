@@ -1,8 +1,8 @@
 import { PrismaClient } from '@prisma/client'
 
 // URL do banco Supabase (connection pooler - porta 6543)
-// Definida diretamente para evitar problemas de parsing do .env com caracteres especiais
-const SUPABASE_DATABASE_URL = 'postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1'
+// Definida diretamente como fallback para evitar problemas de parsing do .env
+const SUPABASE_DATABASE_URL = 'postgresql://postgres.xwlaedcdeyxpxywbdbus:Skopek231165@aws-0-sa-east-1.pooler.supabase.com:6543/postgres'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined

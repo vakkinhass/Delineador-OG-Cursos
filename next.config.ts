@@ -6,13 +6,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // Permite que o app seja acessado por domínios externos (link oficial deployado)
+  // Permite que o app seja acessado por dominios externos (link oficial deployado)
   // sem bloquear recursos /_next/* no modo de desenvolvimento.
   allowedDevOrigins: [
     "https://delineadorogcursos.space-z.ai",
     "http://delineadorogcursos.space-z.ai",
-    "https://*.space-z.ai",
-    "http://*.space-z.ai",
   ],
 };
 
