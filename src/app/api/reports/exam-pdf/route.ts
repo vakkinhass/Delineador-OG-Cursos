@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'ID da prova é obrigatório.' }, { status: 400 })
   }
 
+  try {
   const examRes = await query(
     `SELECT e.id, e.title, e."durationMinutes" AS durationminutes,
             e."startDateTime" AS startdatetime, e."endDateTime" AS enddatetime,
@@ -59,12 +60,12 @@ export async function GET(request: NextRequest) {
       totalQuestions: questionsRes.rows.length,
       questions: questionsRes.rows.map((q, index) => ({
         index: index + 1,
-        subjectName: q.subjectname,
-        statement: q.statement,
-        optionA: q.optiona,
-        optionB: q.optionb,
-        optionC: q.optionc,
-        optionD: q.optiond,
+        subjectName: q.subjectname || '',
+        statement: q.statement || '',
+        optionA: q.optiona || '',
+        optionB: q.optionb || '',
+        optionC: q.optionc || '',
+        optionD: q.optiond || '',
         correctAnswer: withKey ? q.correctanswer : undefined,
         explanation: withKey ? q.explanation || undefined : undefined,
       })),
@@ -83,4 +84,11 @@ export async function GET(request: NextRequest) {
       'Cache-Control': 'no-store',
     },
   })
+  } catch (pdfError: any) {
+    console.error('Exam PDF error:', pdfError)
+    return NextResponse.json(
+      { error: 'Erro ao gerar PDF: ' + (pdfError?.message || 'unknown') },
+      { status: 500 }
+    )
+  }
 }
