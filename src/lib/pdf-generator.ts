@@ -478,7 +478,7 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
     y -= 18
 
     // Cabeçalho da tabela
-    const colWidths = [130, 75, 55, 45, 45, 50, 55, 50] // nome, cpf, data, horário, duração, nota, recup, média
+    const colWidths = [110, 70, 48, 40, 42, 42, 48, 42, 55] // nome, cpf, data, horário, duração, nota, recup, média, situação
     const colX = [margin]
     for (let i = 0; i < colWidths.length; i++) {
       colX.push(colX[i] + colWidths[i])
@@ -488,7 +488,7 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
     page.drawRectangle({
       x: margin, y: y - 14, width: contentWidth, height: 16, color: OCEAN_GREEN,
     })
-    const headers = ['Aluno', 'CPF', 'Data', 'Horário', 'Duração', 'Nota', 'Recup.', 'Média']
+    const headers = ['Aluno', 'CPF', 'Data', 'Horário', 'Duração', 'Nota', 'Recup.', 'Média', 'Situação']
     for (let i = 0; i < headers.length; i++) {
       page.drawText(headers[i], {
         x: colX[i] + 3, y: y - 9, size: 8, font: helveticaBold, color: rgb(1, 1, 1),
@@ -510,7 +510,7 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
       }
 
       const values = [
-        row.nome.length > 22 ? row.nome.slice(0, 21) + '…' : row.nome,
+        row.nome.length > 18 ? row.nome.slice(0, 17) + '…' : row.nome,
         row.cpf,
         row.dataProva,
         row.horario,
@@ -518,10 +518,11 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
         `${row.notaObtida.toFixed(1)}%`,
         row.notaRecuperacao !== null ? `${row.notaRecuperacao.toFixed(1)}%` : (row.recoveryStatus === 'Pendente' ? 'Pendente' : '—'),
         `${row.mediaFinal.toFixed(1)}%`,
+        row.situacao,
       ]
 
       for (let i = 0; i < values.length; i++) {
-        const isSituacao = i === 7
+        const isSituacao = i === 8 // última coluna = situação
         const color = isSituacao
           ? (row.situacao === 'Aprovado' ? OCEAN_GREEN : rgb(0.7, 0.1, 0.1))
           : DARK_TEXT
@@ -530,12 +531,6 @@ export async function generateTurmaReportPdf(data: TurmaReportData): Promise<Uin
           font: isSituacao ? helveticaBold : helvetica, color,
         })
       }
-
-      // Badge de situação ao final
-      const situacaoColor = row.situacao === 'Aprovado' ? OCEAN_GREEN : rgb(0.7, 0.1, 0.1)
-      page.drawText(row.situacao, {
-        x: colX[7] + 3, y: y - 9, size: 8, font: helveticaBold, color: situacaoColor,
-      })
 
       y -= 16
     }
